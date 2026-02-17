@@ -1,16 +1,10 @@
-/// <reference types='vitest' />
-import { defineConfig } from 'vite';
+import { defineConfig } from 'vitest/config';
 
 export default defineConfig(() => ({
   root: import.meta.dirname,
-  cacheDir: '../../node_modules/.vite/packages/core',
-  plugins: [],
-  // Uncomment this if you are using workers.
-  // worker: {
-  //  plugins: [],
-  // },
+  cacheDir: '../../node_modules/.vite/packages/utils',
   test: {
-    name: '@ts-contract/core',
+    name: '@ts-contract/utils',
     watch: false,
     globals: true,
     environment: 'node',

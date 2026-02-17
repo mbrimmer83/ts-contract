@@ -1,6 +1,6 @@
 import { expectTypeOf } from 'vitest';
 import { z } from 'zod';
-import { createContract } from './dsl';
+import { createContract, isRouteDef } from './dsl';
 import type { RouteDef } from './dsl';
 import type {
   InferPathParams,
@@ -186,5 +186,59 @@ describe('InferArgs', () => {
   it('should produce empty object when no args defined', () => {
     type Result = InferArgs<typeof contract.listPokemon>;
     expectTypeOf<Result>().toExtend<object>();
+  });
+});
+
+const nestedContract = createContract({
+  pokemon: {
+    getById: {
+      method: 'GET',
+      path: '/pokemon/:id',
+      pathParams: z.object({ id: z.string() }),
+      responses: {
+        200: z.object({ name: z.string(), type: z.string() }),
+        404: z.object({ message: z.string() }),
+      },
+    },
+    list: {
+      method: 'GET',
+      path: '/pokemon',
+      responses: {
+        200: z.array(z.object({ name: z.string() })),
+      },
+    },
+  },
+  health: {
+    method: 'GET',
+    path: '/health',
+    responses: {
+      200: z.object({ status: z.string() }),
+    },
+  },
+});
+
+describe('nested contracts', () => {
+  it('should preserve nested route definitions', () => {
+    expectTypeOf(nestedContract.pokemon.getById).toExtend<RouteDef>();
+    expectTypeOf(nestedContract.pokemon.list).toExtend<RouteDef>();
+  });
+
+  it('should preserve top-level route definitions alongside nested ones', () => {
+    expectTypeOf(nestedContract.health).toExtend<RouteDef>();
+  });
+
+  it('should preserve literal types through nesting', () => {
+    expectTypeOf(nestedContract.pokemon.getById.method).toEqualTypeOf<'GET'>();
+    expectTypeOf(nestedContract.pokemon.getById.path).toExtend<string>();
+  });
+
+  it('should infer types from nested routes', () => {
+    type Params = InferPathParams<typeof nestedContract.pokemon.getById>;
+    expectTypeOf<Params>().toEqualTypeOf<{ id: string }>();
+  });
+
+  it('should distinguish routes from nested contracts with isRouteDef', () => {
+    expect(isRouteDef(nestedContract.health)).toBe(true);
+    expect(isRouteDef(nestedContract.pokemon)).toBe(false);
   });
 });

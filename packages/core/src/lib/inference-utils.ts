@@ -1,9 +1,9 @@
 import type { RouteDef } from './dsl';
-import type { InferSchema, SchemaProtocol } from './schema-types';
+import type { InferSchema, StandardSchemaV1 } from './schema-types';
 import type { HttpStatusCodes } from './http-types';
 
 type InferOrUndefined<T> =
-  T extends SchemaProtocol<infer Out> ? Out : undefined;
+  T extends StandardSchemaV1<unknown, infer Out> ? Out : undefined;
 
 /**
  * Infer path parameters from a route
@@ -23,7 +23,7 @@ export type InferBody<R extends RouteDef> = InferOrUndefined<R['body']>;
  * Infer request headers from a route
  */
 export type InferHeaders<R extends RouteDef> =
-  R['headers'] extends Record<string, SchemaProtocol<unknown>>
+  R['headers'] extends Record<string, StandardSchemaV1>
     ? { [K in keyof R['headers']]: InferSchema<R['headers'][K]> }
     : undefined;
 
@@ -38,14 +38,17 @@ export type InferResponseMap<R extends RouteDef> = {
  * Infer a specific response body from a route by status code
  */
 export type InferResponseBody<R extends RouteDef, S extends HttpStatusCodes> =
-  R['responses'][S] extends SchemaProtocol<infer Out> ? Out : never;
+  R['responses'][S] extends StandardSchemaV1<unknown, infer Out> ? Out : never;
 
 /**
  * Infer all responses as a discriminated union of { status, body }
  */
 export type InferResponses<R extends RouteDef> = {
   [K in keyof R['responses'] &
-    HttpStatusCodes]: R['responses'][K] extends SchemaProtocol<infer Out>
+    HttpStatusCodes]: R['responses'][K] extends StandardSchemaV1<
+    unknown,
+    infer Out
+  >
     ? { status: K; body: Out }
     : never;
 }[keyof R['responses'] & HttpStatusCodes];

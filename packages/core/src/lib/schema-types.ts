@@ -1,16 +1,44 @@
 /**
- * Schema protocol for type-safe parsing
+ * Standard Schema v1 result types
  */
-export type SchemaProtocol<TOutput> = {
-  parse(input: unknown): TOutput;
-};
+export interface StandardSchemaV1Issue {
+  readonly message: string;
+  readonly path?: ReadonlyArray<PropertyKey | { readonly key: PropertyKey }>;
+}
+
+export type StandardSchemaV1Result<Output> =
+  | { readonly value: Output; readonly issues?: undefined }
+  | { readonly issues: ReadonlyArray<StandardSchemaV1Issue> };
 
 /**
- * Infer the output type from a schema
+ * Standard Schema v1 protocol — implemented by Zod v4, Valibot v1, ArkType, etc.
  */
-export type InferSchema<T> = T extends { parse(input: unknown): infer Out }
-  ? Out
-  : never;
+export interface StandardSchemaV1<Input = unknown, Output = Input> {
+  readonly '~standard': {
+    readonly version: 1;
+    readonly vendor: string;
+    readonly validate: (
+      value: unknown,
+    ) =>
+      | StandardSchemaV1Result<Output>
+      | Promise<StandardSchemaV1Result<Output>>;
+    readonly types?: { readonly input: Input; readonly output: Output };
+  };
+}
+
+/**
+ * Schema protocol — alias for StandardSchemaV1
+ */
+export type SchemaProtocol<TOutput = unknown> = StandardSchemaV1<
+  unknown,
+  TOutput
+>;
+
+/**
+ * Infer the output type from a Standard Schema
+ */
+export type InferSchema<T> =
+  T extends StandardSchemaV1<unknown, infer Out> ? Out : never;
 
 /**
  * Extract path parameters from a path string

@@ -18,9 +18,17 @@ export type RouteDef = {
 };
 
 /**
- * Contract definition - maps route names to route definitions
+ * Contract definition - maps route names to route definitions or nested contracts
  */
-export type ContractDef = Record<string, RouteDef>;
+export interface ContractDef {
+  [key: string]: RouteDef | ContractDef;
+}
+
+/**
+ * Type guard to check if a value is a RouteDef (has method and path)
+ */
+export const isRouteDef = (value: RouteDef | ContractDef): value is RouteDef =>
+  'method' in value && 'path' in value;
 
 /**
  * Creates a new contract
