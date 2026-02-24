@@ -1,20 +1,9 @@
-import type { ContractDef, RouteDef } from '@ts-contract/core';
+import type { ContractDef, RouteDef } from './dsl';
+import { isRouteDef } from './dsl';
 import type { ContractPlugin, ApplyPlugins } from './plugin-types';
 
 /**
- * Check if a value is a RouteDef (has method and path)
- */
-function isRoute(value: unknown): value is RouteDef {
-  return (
-    typeof value === 'object' &&
-    value !== null &&
-    'method' in value &&
-    'path' in value
-  );
-}
-
-/**
- * Recursively walk a contract tree, applying a mapper function to each RouteDef
+ * Recursively walk a contract tree, applying a mapper function to each RouteDef.
  */
 function mapRoutes(
   contract: ContractDef,
@@ -22,7 +11,7 @@ function mapRoutes(
 ): Record<string, unknown> {
   const result: Record<string, unknown> = {};
   for (const [key, value] of Object.entries(contract)) {
-    if (isRoute(value)) {
+    if (isRouteDef(value)) {
       result[key] = mapper(value);
     } else {
       result[key] = mapRoutes(value as ContractDef, mapper);
@@ -32,7 +21,7 @@ function mapRoutes(
 }
 
 /**
- * Builder that accumulates plugins and resolves them on .build()
+ * Builder that accumulates plugins and resolves them on .build().
  */
 class ContractBuilder<
   C extends ContractDef,
@@ -60,7 +49,7 @@ class ContractBuilder<
 }
 
 /**
- * Create a contract builder that lets you compose plugins onto routes
+ * Create a contract builder that lets you compose plugins onto routes.
  */
 export const initContract = <C extends ContractDef>(
   contract: C,

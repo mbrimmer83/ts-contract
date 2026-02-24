@@ -1,6 +1,10 @@
-import type { RouteDef, InferPathParams, InferQuery } from '@ts-contract/core';
+import type {
+  RouteDef,
+  InferPathParams,
+  InferQuery,
+  ContractPlugin,
+} from '@ts-contract/core';
 import { buildPath } from '../path';
-import type { ContractPlugin } from '../plugin-types';
 
 type BuildPathArgs<R extends RouteDef> =
   InferPathParams<R> extends undefined
@@ -11,10 +15,12 @@ type BuildPathArgs<R extends RouteDef> =
       ? [params: InferPathParams<R>]
       : [params: InferPathParams<R>, query?: InferQuery<R>];
 
-declare module '../plugin-types' {
-  interface PluginTypeRegistry<R extends RouteDef> {
+declare module '@ts-contract/core' {
+  interface PluginTypeRegistry<R> {
     path: {
-      buildPath: (...args: BuildPathArgs<R>) => string;
+      buildPath: R extends RouteDef
+        ? (...args: BuildPathArgs<R>) => string
+        : never;
     };
   }
 }

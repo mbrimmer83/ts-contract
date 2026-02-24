@@ -24,6 +24,7 @@
     "!**/*.tsbuildinfo"
   ],
   "dependencies": {
+    "@standard-schema/spec": "1.1.0",
     "tslib": "^2.3.0"
   }
 }

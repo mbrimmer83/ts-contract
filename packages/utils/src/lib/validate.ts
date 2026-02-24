@@ -7,7 +7,6 @@ import type {
   InferResponseBody,
   HttpStatusCodes,
   StandardSchemaV1,
-  StandardSchemaV1Result,
 } from '@ts-contract/core';
 
 /**
@@ -20,7 +19,7 @@ const validateSchema = <T>(
 ): T => {
   const result = schema['~standard'].validate(
     value,
-  ) as StandardSchemaV1Result<T>;
+  ) as StandardSchemaV1.Result<T>;
   if ('issues' in result && result.issues) {
     const messages = result.issues.map((i) => i.message).join(', ');
     throw new Error(`Validation failed for ${label}: ${messages}`);

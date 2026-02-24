@@ -6,6 +6,7 @@ import type {
   InferHeaders,
   InferResponseBody,
   HttpStatusCodes,
+  ContractPlugin,
 } from '@ts-contract/core';
 import {
   validatePathParams,
@@ -14,19 +15,28 @@ import {
   validateResponse,
   validateHeaders,
 } from '../validate';
-import type { ContractPlugin } from '../plugin-types';
 
-declare module '../plugin-types' {
-  interface PluginTypeRegistry<R extends RouteDef> {
+declare module '@ts-contract/core' {
+  interface PluginTypeRegistry<R> {
     validate: {
-      validatePathParams: (params: unknown) => InferPathParams<R>;
-      validateQuery: (query: unknown) => InferQuery<R>;
-      validateBody: (body: unknown) => InferBody<R>;
-      validateResponse: <S extends keyof R['responses'] & HttpStatusCodes>(
-        status: S,
-        data: unknown,
-      ) => InferResponseBody<R, S>;
-      validateHeaders: (headers: Record<string, unknown>) => InferHeaders<R>;
+      validatePathParams: R extends RouteDef
+        ? (params: unknown) => InferPathParams<R>
+        : never;
+      validateQuery: R extends RouteDef
+        ? (query: unknown) => InferQuery<R>
+        : never;
+      validateBody: R extends RouteDef
+        ? (body: unknown) => InferBody<R>
+        : never;
+      validateResponse: R extends RouteDef
+        ? <S extends keyof R['responses'] & HttpStatusCodes>(
+            status: S,
+            data: unknown,
+          ) => InferResponseBody<R, S>
+        : never;
+      validateHeaders: R extends RouteDef
+        ? (headers: Record<string, unknown>) => InferHeaders<R>
+        : never;
     };
   }
 }

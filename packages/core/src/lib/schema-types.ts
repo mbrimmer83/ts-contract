@@ -1,30 +1,6 @@
-/**
- * Standard Schema v1 result types
- */
-export interface StandardSchemaV1Issue {
-  readonly message: string;
-  readonly path?: ReadonlyArray<PropertyKey | { readonly key: PropertyKey }>;
-}
+import type { StandardSchemaV1 } from '@standard-schema/spec';
 
-export type StandardSchemaV1Result<Output> =
-  | { readonly value: Output; readonly issues?: undefined }
-  | { readonly issues: ReadonlyArray<StandardSchemaV1Issue> };
-
-/**
- * Standard Schema v1 protocol — implemented by Zod v4, Valibot v1, ArkType, etc.
- */
-export interface StandardSchemaV1<Input = unknown, Output = Input> {
-  readonly '~standard': {
-    readonly version: 1;
-    readonly vendor: string;
-    readonly validate: (
-      value: unknown,
-    ) =>
-      | StandardSchemaV1Result<Output>
-      | Promise<StandardSchemaV1Result<Output>>;
-    readonly types?: { readonly input: Input; readonly output: Output };
-  };
-}
+export type { StandardSchemaV1 } from '@standard-schema/spec';
 
 /**
  * Schema protocol — alias for StandardSchemaV1
@@ -37,8 +13,9 @@ export type SchemaProtocol<TOutput = unknown> = StandardSchemaV1<
 /**
  * Infer the output type from a Standard Schema
  */
-export type InferSchema<T> =
-  T extends StandardSchemaV1<unknown, infer Out> ? Out : never;
+export type InferSchema<T> = T extends StandardSchemaV1
+  ? StandardSchemaV1.InferOutput<T>
+  : never;
 
 /**
  * Extract path parameters from a path string
