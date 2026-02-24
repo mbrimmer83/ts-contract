@@ -2,12 +2,12 @@ import { defineConfig } from 'vitest/config';
 
 export default defineConfig(() => ({
   root: import.meta.dirname,
-  cacheDir: '../../node_modules/.vite/packages/utils',
+  cacheDir: '../../node_modules/.vite/packages/plugins',
   resolve: {
     conditions: ['@ts-contract/source'],
   },
   test: {
-    name: '@ts-contract/utils',
+    name: '@ts-contract/plugins',
     watch: false,
     globals: true,
     environment: 'node',
