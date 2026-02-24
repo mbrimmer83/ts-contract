@@ -1,0 +1,51 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 100 100" width="100" height="100">
+  <defs>
+    <linearGradient id="bg" x1="0%" y1="100%" x2="100%" y2="0%">
+      <stop offset="0%" style="stop-color:#0f0c07"/>
+      <stop offset="100%" style="stop-color:#1c1608"/>
+    </linearGradient>
+
+    <linearGradient id="lg" x1="0%" y1="0%" x2="100%" y2="0%">
+      <stop offset="0%" style="stop-color:#f97316"/>
+      <stop offset="100%" style="stop-color:#ea580c"/>
+    </linearGradient>
+
+    <linearGradient id="rg" x1="0%" y1="0%" x2="100%" y2="0%">
+      <stop offset="0%" style="stop-color:#d97706"/>
+      <stop offset="100%" style="stop-color:#fbbf24"/>
+    </linearGradient>
+
+    <filter id="glow" x="-40%" y="-40%" width="180%" height="180%">
+      <feGaussianBlur stdDeviation="3" result="b"/>
+      <feMerge><feMergeNode in="b"/><feMergeNode in="SourceGraphic"/></feMerge>
+    </filter>
+  </defs>
+
+  <!-- Background -->
+  <rect width="100" height="100" rx="18" fill="url(#bg)"/>
+  <rect width="100" height="100" rx="18" fill="none" stroke="#2c1f06" stroke-width="1.5"/>
+
+  <!-- LEFT arrow — points right, tip lands exactly at x=50 -->
+  <!-- rect from x=12 to x=44, tip at x=50 -->
+  <path d="M12 36 L44 36 L56 50 L44 64 L12 64 Z" fill="url(#lg)"/>
+
+  <text x="28" y="50"
+        font-family="'Courier New', Courier, monospace"
+        font-weight="900" font-size="14"
+        fill="#1a0800"
+        text-anchor="middle" dominant-baseline="middle">ts</text>
+
+  <!-- RIGHT arrow — points left, tip lands exactly at x=50 -->
+  <!-- rect from x=88 to x=56, tip at x=50 -->
+  <path d="M88 36 L56 36 L44 50 L56 64 L88 64 Z" fill="url(#rg)"/>
+
+  <text x="72" y="50"
+        font-family="'Courier New', Courier, monospace"
+        font-weight="900" font-size="14"
+        fill="#1a0800"
+        text-anchor="middle" dominant-baseline="middle">{}</text>
+
+  <!-- Clean centre join dot -->
+  <circle cx="50" cy="50" r="3.5" fill="#fff3e0" filter="url(#glow)"/>
+  <circle cx="50" cy="50" r="2" fill="#f97316"/>
+</svg>
