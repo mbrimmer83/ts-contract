@@ -5,18 +5,315 @@ description: Get up and running with ts-contract quickly.
 
 ## Install
 
+<Tabs items={['pnpm', 'npm', 'yarn', 'bun']}>
+<Tab value="pnpm">
 ```bash
-pnpm install
+pnpm add @ts-contract/core @ts-contract/plugins
+```
+</Tab>
+<Tab value="npm">
+```bash
+npm install @ts-contract/core @ts-contract/plugins
+```
+</Tab>
+<Tab value="yarn">
+```bash
+yarn add @ts-contract/core @ts-contract/plugins
+```
+</Tab>
+<Tab value="bun">
+```bash
+bun add @ts-contract/core @ts-contract/plugins
+```
+</Tab>
+</Tabs>
+
+## Define your contract
+
+Use your favorite schema library to define your contract.
+
+<Tabs items={['Zod', 'Valibot', 'Arktype']}>
+<Tab value="Zod">
+```ts title="contract.ts"
+import { createContract } from '@ts-contract/core';
+import { z } from 'zod';
+
+const contract = createContract({
+  getUser: {
+    method: 'GET',
+    path: '/users/:id',
+    pathParams: z.object({ id: z.string() }),
+    responses: {
+      200: z.object({
+        id: z.string(),
+        name: z.string(),
+        email: z.string().email(),
+      }),
+      404: z.object({ message: z.string() }),
+    },
+  },
+});
+```
+</Tab>
+<Tab value="Valibot">
+```ts title="contract.ts"
+import { createContract } from '@ts-contract/core';
+import * as v from 'valibot';
+
+const contract = createContract({
+  getUser: {
+    method: 'GET',
+    path: '/users/:id',
+    pathParams: v.object({ id: v.string() }),
+    responses: {
+      200: v.object({
+        id: v.string(),
+        name: v.string(),
+        email: v.pipe(v.string(), v.email()),
+      }),
+      404: v.object({ message: v.string() }),
+    },
+  },
+});
+```
+</Tab>
+<Tab value="Arktype">
+```ts title="contract.ts"
+import { createContract } from '@ts-contract/core';
+import { type } from 'arktype';
+
+const contract = createContract({
+  getUser: {
+    method: 'GET',
+    path: '/users/:id',
+    pathParams: type({ id: 'string' }),
+    responses: {
+      200: type({
+        id: 'string',
+        name: 'string',
+        email: 'string.email',
+      }),
+      404: type({ message: 'string' }),
+    },
+  },
+});
+```
+</Tab>
+</Tabs>
+
+## Initialize your contract and add plugins
+
+Once you've defined your contract, use `initContract` to create a builder and compose plugins with `.use()`. Call `.build()` to produce a fully enhanced contract.
+
+```ts twoslash title="api.ts"
+// @filename: contract.ts
+import { createContract } from '@ts-contract/core';
+import { z } from 'zod';
+
+export const contract = createContract({
+  getUser: {
+    method: 'GET',
+    path: '/users/:id',
+    pathParams: z.object({ id: z.string() }),
+    responses: {
+      200: z.object({
+        id: z.string(),
+        name: z.string(),
+        email: z.string().email(),
+      }),
+      404: z.object({ message: z.string() }),
+    },
+  },
+});
+
+// @filename: api.ts
+// ---cut---
+import { initContract } from '@ts-contract/core';
+import { pathPlugin, validatePlugin } from '@ts-contract/plugins';
+import { contract } from './contract';
+
+const api = initContract(contract)
+  .use(pathPlugin)
+  .use(validatePlugin)
+  .build();
+
+// Build a type-safe URL
+const url = api.getUser.buildPath({ id: '123' });
+// => "/users/123"
+
+// Validate incoming data against your schema
+const user = api.getUser.validateResponse(200, { id: '1', name: 'Alice', email: 'alice@example.com' });
 ```
 
-## Run Docs
+## Type inference helpers
 
-```bash
-pnpm --filter @ts-contract/docs dev
+Use the built-in type helpers to extract types from your contract routes.
+
+```ts twoslash title="types.ts"
+import { createContract, type InferPathParams, type InferResponseBody, type InferResponses, type InferArgs } from '@ts-contract/core';
+import { z } from 'zod';
+
+const contract = createContract({
+  getUser: {
+    method: 'GET',
+    path: '/users/:id',
+    pathParams: z.object({ id: z.string() }),
+    query: z.object({ include: z.string().optional() }),
+    responses: {
+      200: z.object({
+        id: z.string(),
+        name: z.string(),
+        email: z.string().email(),
+      }),
+      404: z.object({ message: z.string() }),
+    },
+  },
+});
+
+// ---cut---
+// Infer path parameters
+type Params = InferPathParams<typeof contract.getUser>;
+
+// Infer a specific response body by status code
+type User = InferResponseBody<typeof contract.getUser, 200>;
+
+// Infer all responses as a discriminated union
+type Responses = InferResponses<typeof contract.getUser>;
+
+// Infer all arguments (path, query, body, headers) merged
+type Args = InferArgs<typeof contract.getUser>;
 ```
 
-## Next Steps
+## Fulfill your contract on the server
 
-- Define your first contract.
-- Add request/response schemas.
-- Generate and publish docs updates.
+ts-contract doesn't own your server integration — you use the inference types to wire things up yourself.
+
+<Tabs items={['Hono', 'Express', 'Fastify']}>
+<Tab value="Hono">
+```ts title="server.ts"
+import { type InferPathParams, type InferResponseBody } from '@ts-contract/core';
+import { Hono } from 'hono';
+import { contract } from './contract';
+
+type Params = InferPathParams<typeof contract.getUser>;
+// => { id: string }
+type UserResponse = InferResponseBody<typeof contract.getUser, 200>;
+// => { id: string; name: string; email: string }
+
+const app = new Hono();
+
+app.get('/users/:id', (c) => {
+  const { id } = c.req.param() as Params;
+
+  const user: UserResponse = {
+    id,
+    name: 'Alice',
+    email: 'alice@example.com',
+  };
+
+  return c.json(user);
+});
+```
+</Tab>
+<Tab value="Express">
+```ts title="server.ts"
+import { type InferPathParams, type InferResponseBody } from '@ts-contract/core';
+import express from 'express';
+import { contract } from './contract';
+
+type Params = InferPathParams<typeof contract.getUser>;
+// => { id: string }
+type UserResponse = InferResponseBody<typeof contract.getUser, 200>;
+// => { id: string; name: string; email: string }
+
+const app = express();
+
+app.get('/users/:id', (req, res) => {
+  const { id } = req.params as Params;
+
+  const user: UserResponse = {
+    id,
+    name: 'Alice',
+    email: 'alice@example.com',
+  };
+
+  res.json(user);
+});
+```
+</Tab>
+<Tab value="Fastify">
+```ts title="server.ts"
+import { type InferPathParams, type InferResponseBody } from '@ts-contract/core';
+import Fastify from 'fastify';
+import { contract } from './contract';
+
+type Params = InferPathParams<typeof contract.getUser>;
+// => { id: string }
+type UserResponse = InferResponseBody<typeof contract.getUser, 200>;
+// => { id: string; name: string; email: string }
+
+const app = Fastify();
+
+app.get<{ Params: Params }>('/users/:id', async (request) => {
+  const { id } = request.params;
+
+  const user: UserResponse = {
+    id,
+    name: 'Alice',
+    email: 'alice@example.com',
+  };
+
+  return user;
+});
+```
+</Tab>
+</Tabs>
+
+## Use in your client code
+
+Combine your contract with React Query for fully type-safe data fetching.
+
+```ts title="use-user.ts"
+import { useQuery } from '@tanstack/react-query';
+import { type InferPathParams, type InferResponseBody } from '@ts-contract/core';
+import { contract } from './contract';
+import { api } from './api';
+
+type Params = InferPathParams<typeof contract.getUser>;
+// => { id: string }
+type User = InferResponseBody<typeof contract.getUser, 200>;
+// => { id: string; name: string; email: string }
+
+export function useUser(id: string) {
+  return useQuery<User>({
+    queryKey: ['user', id],
+    queryFn: async () => {
+      const url = api.getUser.buildPath({ id });
+
+      const res = await fetch(url);
+      const data = await res.json();
+
+      // Validate the response against your schema
+      return api.getUser.validateResponse(200, data);
+    },
+  });
+}
+```
+
+```tsx title="user-profile.tsx"
+import { useUser } from './use-user';
+
+function UserProfile({ id }: { id: string }) {
+  const { data: user, isLoading, error } = useUser(id);
+
+  if (isLoading) return <div>Loading...</div>;
+  if (error) return <div>Error: {error.message}</div>;
+
+  return (
+    <div>
+      <h1>{user.name}</h1>
+      <p>{user.email}</p>
+    </div>
+  );
+}
+```

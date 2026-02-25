@@ -10,34 +10,20 @@ description: An opinionated schema-first TypeScript contract library for definin
     className="w-32 h-32 sm:w-40 sm:h-40 md:w-48 md:h-48"
   />
   <h1 className="text-3xl sm:text-4xl md:text-5xl font-bold">ts-contract</h1>
-  <p className="text-fd-muted-foreground text-center max-w-lg text-base sm:text-lg">
+  <span className="block text-fd-muted-foreground text-center max-w-lg text-base sm:text-lg">
     An opinionated schema-first TypeScript contract library for defining
     type-safe HTTP and WebSocket APIs.
-  </p>
-  <div className="flex flex-wrap justify-center gap-3">
-    <span className="rounded-full border border-fd-border bg-fd-secondary px-4 py-1.5 text-sm font-medium">
-      Supports @standard-schema/spec
-    </span>
-    <span className="rounded-full border border-fd-border bg-fd-secondary px-4 py-1.5 text-sm font-medium">
-      Minimal
-    </span>
-  </div>
+  </span>
 </div>
 
-```ts
-import { contract } from '@ts-contract/core';
-import { z } from 'zod';
+- Small core. Zero integrations.
+- Schema-first.
+- Excellent TypeScript inference.
+- Composable primitives.
+- Integrate it your way.
+- Supports [@standard-schema/spec](https://github.com/standard-schema/standard-schema)
 
-const api = contract({
-  getUser: {
-    method: 'GET',
-    path: '/users/:id',
-    params: z.object({ id: z.string() }),
-    response: z.object({
-      id: z.string(),
-      name: z.string(),
-      email: z.string().email(),
-    }),
-  },
-});
-```
+**Minimal by design. No framework integrations.**
+
+Every integration adds surface area, complexity, and long-term maintenance burden.
+ts-contract stays focused on a small, durable core with first-class TypeScript inference and composable primitives that make it easy to integrate with any stack.
