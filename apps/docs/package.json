@@ -12,6 +12,7 @@
     "postinstall": "fumadocs-mdx"
   },
   "dependencies": {
+    "@shikijs/transformers": "^3.22.0",
     "fumadocs-core": "16.6.5",
     "fumadocs-mdx": "14.2.8",
     "fumadocs-twoslash": "^3.1.13",
