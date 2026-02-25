@@ -1,3 +1,23 @@
 @import 'tailwindcss';
 @import 'fumadocs-ui/css/neutral.css';
 @import 'fumadocs-ui/css/preset.css';
+
+:root {
+  --color-fd-primary: #f97316; /* vibrant orange */
+  --color-fd-ring: #fdba74; /* soft amber glow */
+}
+
+.dark {
+  --color-fd-primary: #f59e0b; /* brighter amber for dark mode */
+  --color-fd-ring: #fcd34d; /* warm highlight ring */
+}
+
+@media (min-width: 1024px) {
+  #nd-docs-layout {
+    --fd-sidebar-width: 268px;
+  }
+
+  #nd-sidebar {
+    max-width: 268px;
+  }
+}
