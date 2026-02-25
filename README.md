@@ -60,7 +60,7 @@ const user = api.getUser.validateResponse(200, data);
 
 ## Documentation
 
-Documentation is available at the [docs site](https://ts-contract.dev) (coming soon).
+Documentation is available at the [docs site](https://ts-contract.com) (coming soon).
 
 To run the docs locally:
 
@@ -71,17 +71,17 @@ pnpm --filter @ts-contract/docs dev
 
 ## Development
 
-This is an [Nx](https://nx.dev) monorepo using [pnpm](https://pnpm.io) workspaces.
+This is a monorepo using [pnpm](https://pnpm.io) workspaces.
 
 ```bash
 # Install dependencies
 pnpm install
 
 # Build all packages
-pnpm nx run-many -t build
+pnpm -r build
 
 # Run tests
-pnpm nx run-many -t test
+pnpm -r test
 
 # Run docs dev server
 pnpm --filter @ts-contract/docs dev
