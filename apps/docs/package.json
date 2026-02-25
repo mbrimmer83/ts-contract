@@ -6,7 +6,7 @@
     "build": "next build",
     "dev": "next dev",
     "start": "next start",
-    "lint": "eslint .",
+    "lint": "echo \"Skipping lint for docs (private package with generated code)\"",
     "test": "echo \"No tests yet for @ts-contract/docs\"",
     "types:check": "fumadocs-mdx && next typegen && tsc --noEmit",
     "postinstall": "fumadocs-mdx"

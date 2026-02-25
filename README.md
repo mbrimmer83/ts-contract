@@ -1,5 +1,8 @@
 # ts-contract
 
+[![CI](https://github.com/mbrimmer83/ts-contract/actions/workflows/ci.yml/badge.svg)](https://github.com/mbrimmer83/ts-contract/actions/workflows/ci.yml)
+[![PR Checks](https://github.com/mbrimmer83/ts-contract/actions/workflows/pr-checks.yml/badge.svg)](https://github.com/mbrimmer83/ts-contract/actions/workflows/pr-checks.yml)
+
 > **🚧 This project is under active development and not yet ready for production use. No alpha version has been published.**
 
 An opinionated schema-first TypeScript contract library for defining type-safe HTTP and WebSocket APIs.
@@ -86,6 +89,16 @@ pnpm -r test
 # Run docs dev server
 pnpm --filter @ts-contract/docs dev
 ```
+
+## Contributing
+
+We welcome contributions! Please see our [Contributing Guide](./CONTRIBUTING.md) for details on:
+
+- Setting up your development environment
+- Our development workflow
+- How to create changesets for version management
+- Pull request process
+- Release process
 
 ## License
 

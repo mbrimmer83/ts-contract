@@ -1,6 +1,7 @@
 {
   "name": "@ts-contract/core",
   "version": "0.0.1",
+  "description": "Contract definitions, type inference helpers, and plugin system for ts-contract",
   "type": "module",
   "main": "./dist/index.js",
   "module": "./dist/index.js",
@@ -23,6 +24,26 @@
     "dist",
     "!**/*.tsbuildinfo"
   ],
+  "repository": {
+    "type": "git",
+    "url": "https://github.com/mbrimmer83/ts-contract.git",
+    "directory": "packages/core"
+  },
+  "homepage": "https://github.com/mbrimmer83/ts-contract#readme",
+  "bugs": {
+    "url": "https://github.com/mbrimmer83/ts-contract/issues"
+  },
+  "keywords": [
+    "typescript",
+    "contract",
+    "api",
+    "schema",
+    "validation",
+    "type-safe"
+  ],
+  "publishConfig": {
+    "access": "public"
+  },
   "dependencies": {
     "@standard-schema/spec": "1.1.0",
     "tslib": "^2.3.0"

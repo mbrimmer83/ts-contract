@@ -1,6 +1,7 @@
 {
   "name": "@ts-contract/plugins",
   "version": "0.0.1",
+  "description": "Built-in plugins for path building and schema validation for ts-contract",
   "type": "module",
   "main": "./dist/index.js",
   "module": "./dist/index.js",
@@ -23,6 +24,25 @@
     "dist",
     "!**/*.tsbuildinfo"
   ],
+  "repository": {
+    "type": "git",
+    "url": "https://github.com/mbrimmer83/ts-contract.git",
+    "directory": "packages/plugins"
+  },
+  "homepage": "https://github.com/mbrimmer83/ts-contract#readme",
+  "bugs": {
+    "url": "https://github.com/mbrimmer83/ts-contract/issues"
+  },
+  "keywords": [
+    "typescript",
+    "contract",
+    "plugins",
+    "validation",
+    "path-building"
+  ],
+  "publishConfig": {
+    "access": "public"
+  },
   "dependencies": {
     "@ts-contract/core": "workspace:*",
     "tslib": "^2.3.0"
