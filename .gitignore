@@ -42,3 +42,7 @@ Thumbs.db
 .nx/workspace-data
 
 vitest.config.*.timestamp*
+
+# Environments
+.env
+.env.local
