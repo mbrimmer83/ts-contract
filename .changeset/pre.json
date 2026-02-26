@@ -1,0 +1,12 @@
+{
+  "mode": "pre",
+  "tag": "alpha",
+  "initialVersions": {
+    "@ts-contract/docs": "0.0.0",
+    "@ts-contract/core": "0.0.1",
+    "@ts-contract/plugins": "0.0.1"
+  },
+  "changesets": [
+    "upset-eyes-brush"
+  ]
+}
