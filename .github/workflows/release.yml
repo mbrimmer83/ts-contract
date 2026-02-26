@@ -108,3 +108,16 @@ jobs:
                 console.error(`Failed to create release for ${tagName}:`, error.message);
               }
             }
+
+      - name: Deploy Documentation to Cloudflare Pages
+        if: steps.changesets.outputs.published == 'true'
+        run: |
+          echo "Building documentation site..."
+          pnpm --filter @ts-contract/docs build
+          echo "Installing Wrangler..."
+          npm install -g wrangler
+          echo "Deploying to Cloudflare Pages..."
+          npx wrangler pages deploy apps/docs/out --project-name=ts-contract-docs
+        env:
+          CLOUDFLARE_API_TOKEN: ${{ secrets.CLOUDFLARE_API_TOKEN }}
+          CLOUDFLARE_ACCOUNT_ID: ${{ secrets.CLOUDFLARE_ACCOUNT_ID }}
