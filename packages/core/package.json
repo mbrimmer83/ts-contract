@@ -1,6 +1,6 @@
 {
   "name": "@ts-contract/core",
-  "version": "0.0.1",
+  "version": "1.0.0-alpha.0",
   "description": "Contract definitions, type inference helpers, and plugin system for ts-contract",
   "type": "module",
   "main": "./dist/index.js",
