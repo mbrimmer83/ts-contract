@@ -1,4 +1,4 @@
-name: PR Checks
+name: CI
 
 on:
   pull_request:
@@ -110,8 +110,8 @@ jobs:
       - name: Run build
         run: pnpm build
 
-  all-checks:
-    name: All Checks Passed
+  status-check:
+    name: PR Checks
     runs-on: ubuntu-latest
     needs: [lint, typecheck, test, build]
     if: always()
