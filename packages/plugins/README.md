@@ -1,7 +1,5 @@
-# utils
+# Plugins
 
-This library was generated with [Nx](https://nx.dev).
+## TODO
 
-## Building
-
-Run `nx build utils` to build the library.
+- [ ] Add plugins for path building and schema validation
