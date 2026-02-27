@@ -82,32 +82,14 @@ The HTTP method for this endpoint:
 type Method = 'GET' | 'POST' | 'PUT' | 'DELETE' | 'PATCH' | 'OPTIONS' | 'HEAD';
 ```
 
-Examples:
-
-```ts
-{ method: 'GET' }    // Retrieve data
-{ method: 'POST' }   // Create new resource
-{ method: 'PUT' }    // Update entire resource
-{ method: 'PATCH' }  // Partial update
-{ method: 'DELETE' } // Remove resource
-```
-
 ### path (required)
 
 The URL path template with optional parameter placeholders using `:paramName` syntax:
 
 ```ts
-// Static path
-path: '/users'
-
-// Single parameter
-path: '/users/:id'
-
-// Multiple parameters
-path: '/users/:userId/posts/:postId'
-
-// Nested paths
-path: '/api/v1/organizations/:orgId/teams/:teamId/members/:memberId'
+path: '/users'                        // Static path
+path: '/users/:id'                    // Single parameter
+path: '/users/:userId/posts/:postId'  // Multiple parameters
 ```
 
 ### pathParams (optional)
@@ -133,20 +115,6 @@ Schema for query string parameters:
   query: z.object({
     page: z.string().optional(),
     limit: z.string().optional(),
-    sort: z.enum(['asc', 'desc']).optional(),
-    filter: z.string().optional(),
-  }),
-}
-```
-
-Query parameters are typically optional and always strings (before parsing):
-
-```ts
-// URL: /users?page=2&limit=10&sort=asc
-{
-  query: z.object({
-    page: z.string().transform(Number).optional(),
-    limit: z.string().transform(Number).optional(),
     sort: z.enum(['asc', 'desc']).optional(),
   }),
 }
@@ -307,33 +275,15 @@ Define multiple response schemas for different status codes:
 ```ts
 {
   responses: {
-    // Success responses
     200: z.object({ data: z.any() }),
     201: z.object({ id: z.string(), createdAt: z.string() }),
-    204: z.null(), // No content
-    
-    // Client error responses
-    400: z.object({ message: z.string(), errors: z.array(z.string()) }),
-    401: z.object({ message: z.string() }),
-    403: z.object({ message: z.string() }),
+    204: z.null(),
+    400: z.object({ message: z.string() }),
     404: z.object({ message: z.string() }),
-    
-    // Server error responses
     500: z.object({ message: z.string() }),
-    503: z.object({ message: z.string(), retryAfter: z.number() }),
   },
 }
 ```
-
-Common HTTP status codes:
-- **200** - OK (successful GET, PUT, PATCH)
-- **201** - Created (successful POST)
-- **204** - No Content (successful DELETE)
-- **400** - Bad Request (validation error)
-- **401** - Unauthorized (authentication required)
-- **403** - Forbidden (insufficient permissions)
-- **404** - Not Found (resource doesn't exist)
-- **500** - Internal Server Error (server-side error)
 
 ## Common CRUD Patterns
 
@@ -350,15 +300,8 @@ Common HTTP status codes:
     }),
     responses: {
       200: z.object({
-        data: z.array(z.object({
-          id: z.string(),
-          name: z.string(),
-        })),
-        pagination: z.object({
-          page: z.number(),
-          limit: z.number(),
-          total: z.number(),
-        }),
+        data: z.array(z.object({ id: z.string(), name: z.string() })),
+        total: z.number(),
       }),
     },
   },
@@ -374,11 +317,7 @@ Common HTTP status codes:
     path: '/users/:id',
     pathParams: z.object({ id: z.string() }),
     responses: {
-      200: z.object({
-        id: z.string(),
-        name: z.string(),
-        email: z.string(),
-      }),
+      200: z.object({ id: z.string(), name: z.string(), email: z.string() }),
       404: z.object({ message: z.string() }),
     },
   },
@@ -392,17 +331,9 @@ Common HTTP status codes:
   createUser: {
     method: 'POST',
     path: '/users',
-    body: z.object({
-      name: z.string(),
-      email: z.string().email(),
-    }),
+    body: z.object({ name: z.string(), email: z.string().email() }),
     responses: {
-      201: z.object({
-        id: z.string(),
-        name: z.string(),
-        email: z.string(),
-        createdAt: z.string(),
-      }),
+      201: z.object({ id: z.string(), name: z.string(), email: z.string() }),
       400: z.object({ message: z.string() }),
     },
   },
@@ -417,17 +348,9 @@ Common HTTP status codes:
     method: 'PUT',
     path: '/users/:id',
     pathParams: z.object({ id: z.string() }),
-    body: z.object({
-      name: z.string(),
-      email: z.string().email(),
-    }),
+    body: z.object({ name: z.string(), email: z.string().email() }),
     responses: {
-      200: z.object({
-        id: z.string(),
-        name: z.string(),
-        email: z.string(),
-        updatedAt: z.string(),
-      }),
+      200: z.object({ id: z.string(), name: z.string(), email: z.string() }),
       404: z.object({ message: z.string() }),
     },
   },

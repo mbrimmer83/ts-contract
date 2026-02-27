@@ -9,6 +9,58 @@ ts-contract provides powerful TypeScript type helpers that extract types from yo
 
 All type inference happens at compile time using TypeScript's type system - there's no runtime overhead.
 
+## Example Contract
+
+We'll use this contract throughout the examples:
+
+```ts
+import { createContract } from '@ts-contract/core';
+import { z } from 'zod';
+
+const contract = createContract({
+  getUser: {
+    method: 'GET',
+    path: '/users/:id',
+    pathParams: z.object({ id: z.string() }),
+    responses: {
+      200: z.object({ id: z.string(), name: z.string(), email: z.string() }),
+      404: z.object({ message: z.string() }),
+    },
+  },
+  listUsers: {
+    method: 'GET',
+    path: '/users',
+    query: z.object({
+      page: z.string().optional(),
+      limit: z.string().optional(),
+    }),
+    responses: {
+      200: z.object({ users: z.array(z.object({ id: z.string(), name: z.string() })), total: z.number() }),
+    },
+  },
+  createUser: {
+    method: 'POST',
+    path: '/users',
+    body: z.object({ name: z.string(), email: z.string().email() }),
+    headers: { 'authorization': z.string() },
+    responses: {
+      201: z.object({ id: z.string(), name: z.string(), email: z.string() }),
+      400: z.object({ message: z.string() }),
+    },
+  },
+  updateUser: {
+    method: 'PUT',
+    path: '/users/:id',
+    pathParams: z.object({ id: z.string() }),
+    query: z.object({ notify: z.boolean().optional() }),
+    body: z.object({ name: z.string(), email: z.string() }),
+    responses: {
+      200: z.object({ id: z.string(), name: z.string(), email: z.string() }),
+    },
+  },
+});
+```
+
 ## Available Type Helpers
 
 ts-contract exports several type helpers from `@ts-contract/core`:
@@ -30,34 +82,8 @@ import type {
 Extract path parameter types from a route:
 
 ```ts
-import { createContract, type InferPathParams } from '@ts-contract/core';
-import { z } from 'zod';
-
-const contract = createContract({
-  getPost: {
-    method: 'GET',
-    path: '/users/:userId/posts/:postId',
-    pathParams: z.object({
-      userId: z.string(),
-      postId: z.string(),
-    }),
-    responses: {
-      200: z.object({ id: z.string(), title: z.string() }),
-    },
-  },
-});
-
-type Params = InferPathParams<typeof contract.getPost>;
-// => { userId: string; postId: string }
-```
-
-**Usage in server code:**
-
-```ts
-app.get('/users/:userId/posts/:postId', (req, res) => {
-  const { userId, postId } = req.params as Params;
-  // userId and postId are typed as string
-});
+type Params = InferPathParams<typeof contract.getUser>;
+// => { id: string }
 ```
 
 ## InferQuery
@@ -65,35 +91,8 @@ app.get('/users/:userId/posts/:postId', (req, res) => {
 Extract query parameter types from a route:
 
 ```ts
-import { createContract, type InferQuery } from '@ts-contract/core';
-import { z } from 'zod';
-
-const contract = createContract({
-  listUsers: {
-    method: 'GET',
-    path: '/users',
-    query: z.object({
-      page: z.string().optional(),
-      limit: z.string().optional(),
-      sort: z.enum(['asc', 'desc']).optional(),
-    }),
-    responses: {
-      200: z.array(z.object({ id: z.string(), name: z.string() })),
-    },
-  },
-});
-
 type Query = InferQuery<typeof contract.listUsers>;
-// => { page?: string; limit?: string; sort?: 'asc' | 'desc' }
-```
-
-**Usage in server code:**
-
-```ts
-app.get('/users', (req, res) => {
-  const { page, limit, sort } = req.query as Query;
-  // All query params are properly typed
-});
+// => { page?: string; limit?: string }
 ```
 
 ## InferBody
@@ -101,35 +100,8 @@ app.get('/users', (req, res) => {
 Extract request body type from a route:
 
 ```ts
-import { createContract, type InferBody } from '@ts-contract/core';
-import { z } from 'zod';
-
-const contract = createContract({
-  createUser: {
-    method: 'POST',
-    path: '/users',
-    body: z.object({
-      name: z.string(),
-      email: z.string().email(),
-      age: z.number().int().min(0),
-    }),
-    responses: {
-      201: z.object({ id: z.string(), name: z.string() }),
-    },
-  },
-});
-
 type Body = InferBody<typeof contract.createUser>;
-// => { name: string; email: string; age: number }
-```
-
-**Usage in server code:**
-
-```ts
-app.post('/users', (req, res) => {
-  const body = req.body as Body;
-  // body.name, body.email, body.age are all typed
-});
+// => { name: string; email: string }
 ```
 
 ## InferHeaders
@@ -137,35 +109,8 @@ app.post('/users', (req, res) => {
 Extract request header types from a route:
 
 ```ts
-import { createContract, type InferHeaders } from '@ts-contract/core';
-import { z } from 'zod';
-
-const contract = createContract({
-  getProtectedResource: {
-    method: 'GET',
-    path: '/protected',
-    headers: {
-      'authorization': z.string(),
-      'x-api-key': z.string(),
-    },
-    responses: {
-      200: z.object({ data: z.string() }),
-    },
-  },
-});
-
-type Headers = InferHeaders<typeof contract.getProtectedResource>;
-// => { authorization: string; 'x-api-key': string }
-```
-
-**Usage in server code:**
-
-```ts
-app.get('/protected', (req, res) => {
-  const headers = req.headers as Headers;
-  const apiKey = headers['x-api-key'];
-  // Headers are typed
-});
+type Headers = InferHeaders<typeof contract.createUser>;
+// => { authorization: string }
 ```
 
 ## InferResponseBody
@@ -173,48 +118,11 @@ app.get('/protected', (req, res) => {
 Extract a specific response type by status code:
 
 ```ts
-import { createContract, type InferResponseBody } from '@ts-contract/core';
-import { z } from 'zod';
-
-const contract = createContract({
-  getUser: {
-    method: 'GET',
-    path: '/users/:id',
-    pathParams: z.object({ id: z.string() }),
-    responses: {
-      200: z.object({
-        id: z.string(),
-        name: z.string(),
-        email: z.string().email(),
-      }),
-      404: z.object({
-        message: z.string(),
-      }),
-    },
-  },
-});
-
-type SuccessResponse = InferResponseBody<typeof contract.getUser, 200>;
+type User = InferResponseBody<typeof contract.getUser, 200>;
 // => { id: string; name: string; email: string }
 
-type ErrorResponse = InferResponseBody<typeof contract.getUser, 404>;
+type NotFound = InferResponseBody<typeof contract.getUser, 404>;
 // => { message: string }
-```
-
-**Usage in client code:**
-
-```ts
-async function getUser(id: string): Promise<SuccessResponse> {
-  const response = await fetch(`/users/${id}`);
-  
-  if (!response.ok) {
-    const error: ErrorResponse = await response.json();
-    throw new Error(error.message);
-  }
-  
-  const user: SuccessResponse = await response.json();
-  return user;
-}
 ```
 
 ## InferResponses
@@ -222,55 +130,10 @@ async function getUser(id: string): Promise<SuccessResponse> {
 Extract all responses as a discriminated union:
 
 ```ts
-import { createContract, type InferResponses } from '@ts-contract/core';
-import { z } from 'zod';
-
-const contract = createContract({
-  getUser: {
-    method: 'GET',
-    path: '/users/:id',
-    pathParams: z.object({ id: z.string() }),
-    responses: {
-      200: z.object({
-        id: z.string(),
-        name: z.string(),
-      }),
-      404: z.object({
-        message: z.string(),
-      }),
-      500: z.object({
-        message: z.string(),
-      }),
-    },
-  },
-});
-
 type Response = InferResponses<typeof contract.getUser>;
 // => 
-// | { status: 200; body: { id: string; name: string } }
+// | { status: 200; body: { id: string; name: string; email: string } }
 // | { status: 404; body: { message: string } }
-// | { status: 500; body: { message: string } }
-```
-
-**Usage with discriminated unions:**
-
-```ts
-function handleResponse(response: Response) {
-  switch (response.status) {
-    case 200:
-      // response.body is { id: string; name: string }
-      console.log(response.body.name);
-      break;
-    case 404:
-      // response.body is { message: string }
-      console.error('Not found:', response.body.message);
-      break;
-    case 500:
-      // response.body is { message: string }
-      console.error('Server error:', response.body.message);
-      break;
-  }
-}
 ```
 
 ## InferArgs
@@ -278,25 +141,6 @@ function handleResponse(response: Response) {
 Merge all input types (params, query, body, headers) into a single object:
 
 ```ts
-import { createContract, type InferArgs } from '@ts-contract/core';
-import { z } from 'zod';
-
-const contract = createContract({
-  updateUser: {
-    method: 'PUT',
-    path: '/users/:id',
-    pathParams: z.object({ id: z.string() }),
-    query: z.object({ notify: z.boolean().optional() }),
-    body: z.object({
-      name: z.string(),
-      email: z.string(),
-    }),
-    responses: {
-      200: z.object({ id: z.string(), name: z.string() }),
-    },
-  },
-});
-
 type Args = InferArgs<typeof contract.updateUser>;
 // => {
 //   params: { id: string };
@@ -305,111 +149,13 @@ type Args = InferArgs<typeof contract.updateUser>;
 // }
 ```
 
-**Usage in helper functions:**
+## Usage Examples
 
-```ts
-function buildUpdateUserRequest(args: Args) {
-  const url = `/users/${args.params.id}${args.query.notify ? '?notify=true' : ''}`;
-  const body = JSON.stringify(args.body);
-  
-  return { url, body };
-}
-```
+For complete usage examples, see:
 
-## Practical Usage Examples
-
-### Server-Side Type Safety
-
-```ts
-import { type InferPathParams, type InferResponseBody } from '@ts-contract/core';
-import express from 'express';
-import { contract } from './contract';
-
-type Params = InferPathParams<typeof contract.getUser>;
-type User = InferResponseBody<typeof contract.getUser, 200>;
-type NotFound = InferResponseBody<typeof contract.getUser, 404>;
-
-const app = express();
-
-app.get('/users/:id', (req, res) => {
-  const { id } = req.params as Params;
-  
-  const user = database.findUser(id);
-  
-  if (!user) {
-    const error: NotFound = { message: 'User not found' };
-    return res.status(404).json(error);
-  }
-  
-  const response: User = {
-    id: user.id,
-    name: user.name,
-    email: user.email,
-  };
-  
-  res.json(response);
-});
-```
-
-### Client-Side Type Safety
-
-```ts
-import { type InferPathParams, type InferResponseBody } from '@ts-contract/core';
-import { contract } from './contract';
-
-type Params = InferPathParams<typeof contract.getUser>;
-type User = InferResponseBody<typeof contract.getUser, 200>;
-
-async function fetchUser(id: Params['id']): Promise<User> {
-  const response = await fetch(`/users/${id}`);
-  
-  if (!response.ok) {
-    throw new Error('Failed to fetch user');
-  }
-  
-  const user: User = await response.json();
-  return user;
-}
-
-// Usage
-const user = await fetchUser('123');
-console.log(user.name); // TypeScript knows this exists
-```
-
-### React Query Integration
-
-```ts
-import { useQuery } from '@tanstack/react-query';
-import { type InferPathParams, type InferResponseBody } from '@ts-contract/core';
-import { contract } from './contract';
-
-type User = InferResponseBody<typeof contract.getUser, 200>;
-
-export function useUser(id: string) {
-  return useQuery<User>({
-    queryKey: ['user', id],
-    queryFn: async () => {
-      const response = await fetch(`/users/${id}`);
-      const data = await response.json();
-      return data;
-    },
-  });
-}
-
-// Usage in component
-function UserProfile({ id }: { id: string }) {
-  const { data: user } = useUser(id);
-  
-  if (!user) return null;
-  
-  return (
-    <div>
-      <h1>{user.name}</h1>
-      <p>{user.email}</p>
-    </div>
-  );
-}
-```
+- **Server-side**: [Express Integration](/recipes/server/express), [Hono Integration](/recipes/server/hono), [Fastify Integration](/recipes/server/fastify)
+- **Client-side**: [React Query Integration](/recipes/client/react-query), [Vanilla Fetch](/recipes/client/vanilla-fetch)
+- **Full-stack**: [E2E Type Safety](/recipes/full-stack/e2e-type-safety)
 
 ## Tips for Maximizing Type Inference
 
@@ -465,36 +211,6 @@ type NewUser = Omit<User, 'id'>;
 type UserSummary = Pick<User, 'id' | 'name'>;
 ```
 
-### 5. Handle Optional Fields
-
-Be aware of optional vs required fields:
-
-```ts
-const contract = createContract({
-  listUsers: {
-    method: 'GET',
-    path: '/users',
-    query: z.object({
-      page: z.string().optional(),
-      limit: z.string().optional(),
-    }),
-    responses: {
-      200: z.array(z.object({ id: z.string() })),
-    },
-  },
-});
-
-type Query = InferQuery<typeof contract.listUsers>;
-// => { page?: string; limit?: string }
-
-// Access with optional chaining
-function buildUrl(query: Query) {
-  const params = new URLSearchParams();
-  if (query.page) params.set('page', query.page);
-  if (query.limit) params.set('limit', query.limit);
-  return `/users?${params}`;
-}
-```
 
 ## Next Steps
 
