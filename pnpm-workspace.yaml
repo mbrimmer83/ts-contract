@@ -1,6 +1,7 @@
 packages:
   - 'apps/*'
   - 'recipes/*'
+  - 'recipes/fastify-react-query/*'
   - 'packages/*'
 
 autoInstallPeers: true

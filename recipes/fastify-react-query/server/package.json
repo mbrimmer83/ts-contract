@@ -1,0 +1,23 @@
+{
+  "name": "@ts-contract-recipes/server",
+  "version": "1.0.0",
+  "private": true,
+  "type": "module",
+  "scripts": {
+    "dev": "tsx watch src/index.ts",
+    "build": "tsc",
+    "start": "node dist/index.js",
+    "type-check": "tsc --noEmit"
+  },
+  "dependencies": {
+    "@ts-contract/core": "workspace:*",
+    "@ts-contract-recipes/shared": "workspace:*",
+    "@fastify/cors": "^8.5.0",
+    "fastify": "^4.25.2"
+  },
+  "devDependencies": {
+    "@types/node": "^20.10.6",
+    "tsx": "^4.7.0",
+    "typescript": "^5.3.3"
+  }
+}
