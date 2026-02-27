@@ -1,0 +1,465 @@
+---
+title: createContract
+description: API reference for the createContract function.
+---
+
+## Overview
+
+`createContract` is the primary function for defining your API contract. It accepts a contract definition and returns it with full type inference.
+
+## Import
+
+```ts
+import { createContract } from '@ts-contract/core';
+```
+
+## Signature
+
+```ts
+function createContract<C extends ContractDef>(contract: C): C
+```
+
+### Type Parameters
+
+- **C** - The contract definition type, inferred from the argument
+
+### Parameters
+
+- **contract** - An object defining your API routes and nested contracts
+
+### Returns
+
+The same contract object with full TypeScript type information
+
+## Usage
+
+### Basic Contract
+
+```ts
+import { createContract } from '@ts-contract/core';
+import { z } from 'zod';
+
+const contract = createContract({
+  getUser: {
+    method: 'GET',
+    path: '/users/:id',
+    pathParams: z.object({ id: z.string() }),
+    responses: {
+      200: z.object({
+        id: z.string(),
+        name: z.string(),
+        email: z.string().email(),
+      }),
+      404: z.object({ message: z.string() }),
+    },
+  },
+});
+```
+
+### Multiple Routes
+
+```ts
+const contract = createContract({
+  getUser: {
+    method: 'GET',
+    path: '/users/:id',
+    pathParams: z.object({ id: z.string() }),
+    responses: {
+      200: z.object({ id: z.string(), name: z.string() }),
+    },
+  },
+  createUser: {
+    method: 'POST',
+    path: '/users',
+    body: z.object({
+      name: z.string(),
+      email: z.string().email(),
+    }),
+    responses: {
+      201: z.object({ id: z.string(), name: z.string() }),
+    },
+  },
+  updateUser: {
+    method: 'PUT',
+    path: '/users/:id',
+    pathParams: z.object({ id: z.string() }),
+    body: z.object({
+      name: z.string(),
+      email: z.string().email(),
+    }),
+    responses: {
+      200: z.object({ id: z.string(), name: z.string() }),
+    },
+  },
+  deleteUser: {
+    method: 'DELETE',
+    path: '/users/:id',
+    pathParams: z.object({ id: z.string() }),
+    responses: {
+      204: z.null(),
+    },
+  },
+});
+```
+
+### Nested Contracts
+
+```ts
+const contract = createContract({
+  users: {
+    list: {
+      method: 'GET',
+      path: '/users',
+      responses: {
+        200: z.array(z.object({ id: z.string() })),
+      },
+    },
+    get: {
+      method: 'GET',
+      path: '/users/:id',
+      pathParams: z.object({ id: z.string() }),
+      responses: {
+        200: z.object({ id: z.string(), name: z.string() }),
+      },
+    },
+  },
+  posts: {
+    list: {
+      method: 'GET',
+      path: '/posts',
+      responses: {
+        200: z.array(z.object({ id: z.string() })),
+      },
+    },
+    get: {
+      method: 'GET',
+      path: '/posts/:id',
+      pathParams: z.object({ id: z.string() }),
+      responses: {
+        200: z.object({ id: z.string(), title: z.string() }),
+      },
+    },
+  },
+});
+
+// Access nested routes
+type UserListRoute = typeof contract.users.list;
+type PostGetRoute = typeof contract.posts.get;
+```
+
+### Composing Contracts
+
+```ts
+const userContract = createContract({
+  getUser: { /* ... */ },
+  createUser: { /* ... */ },
+});
+
+const postContract = createContract({
+  getPost: { /* ... */ },
+  createPost: { /* ... */ },
+});
+
+const apiContract = createContract({
+  users: userContract,
+  posts: postContract,
+});
+```
+
+## Related Types
+
+### ContractDef
+
+The type for a contract definition:
+
+```ts
+interface ContractDef {
+  [key: string]: RouteDef | ContractDef;
+}
+```
+
+A contract is an object where each value is either:
+- A `RouteDef` (route definition)
+- Another `ContractDef` (nested contract)
+
+### RouteDef
+
+The type for a route definition:
+
+```ts
+type RouteDef = {
+  method: Method;
+  path: string;
+  pathParams?: SchemaProtocol<any>;
+  query?: SchemaProtocol<any>;
+  headers?: Record<string, SchemaProtocol<any>>;
+  body?: SchemaProtocol<any>;
+  responses: Partial<Record<HttpStatusCodes, SchemaProtocol<any>>>;
+  summary?: string;
+  metadata?: Record<string, string | number | boolean>;
+};
+```
+
+**Required fields:**
+- `method` - HTTP method (GET, POST, PUT, DELETE, PATCH, OPTIONS, HEAD)
+- `path` - URL path template with optional `:param` placeholders
+- `responses` - Object mapping status codes to response schemas
+
+**Optional fields:**
+- `pathParams` - Schema for path parameters
+- `query` - Schema for query string parameters
+- `headers` - Object mapping header names to schemas
+- `body` - Schema for request body
+- `summary` - Human-readable description
+- `metadata` - Custom key-value pairs
+
+### Method
+
+```ts
+type Method = 'GET' | 'POST' | 'PUT' | 'DELETE' | 'PATCH' | 'OPTIONS' | 'HEAD';
+```
+
+### HttpStatusCodes
+
+```ts
+type HttpStatusCodes = 
+  | 100 | 101 | 102
+  | 200 | 201 | 202 | 203 | 204 | 205 | 206 | 207 | 208 | 226
+  | 300 | 301 | 302 | 303 | 304 | 305 | 307 | 308
+  | 400 | 401 | 402 | 403 | 404 | 405 | 406 | 407 | 408 | 409
+  | 410 | 411 | 412 | 413 | 414 | 415 | 416 | 417 | 418 | 419
+  | 420 | 421 | 422 | 423 | 424 | 428 | 429 | 431 | 451
+  | 500 | 501 | 502 | 503 | 504 | 505 | 507 | 511;
+```
+
+## Type Inference
+
+The contract returned by `createContract` preserves full type information:
+
+```ts
+const contract = createContract({
+  getUser: {
+    method: 'GET',
+    path: '/users/:id',
+    pathParams: z.object({ id: z.string() }),
+    responses: {
+      200: z.object({ id: z.string(), name: z.string() }),
+    },
+  },
+});
+
+// TypeScript knows the exact structure
+type GetUserRoute = typeof contract.getUser;
+// {
+//   method: 'GET';
+//   path: '/users/:id';
+//   pathParams: ZodObject<{ id: ZodString }>;
+//   responses: { 200: ZodObject<{ id: ZodString; name: ZodString }> };
+// }
+```
+
+## Examples
+
+### With Different Schema Libraries
+
+#### Zod
+
+```ts
+import { z } from 'zod';
+
+const contract = createContract({
+  getUser: {
+    method: 'GET',
+    path: '/users/:id',
+    pathParams: z.object({ id: z.string().uuid() }),
+    responses: {
+      200: z.object({
+        id: z.string().uuid(),
+        name: z.string().min(1),
+        email: z.string().email(),
+      }),
+    },
+  },
+});
+```
+
+#### Valibot
+
+```ts
+import * as v from 'valibot';
+
+const contract = createContract({
+  getUser: {
+    method: 'GET',
+    path: '/users/:id',
+    pathParams: v.object({ id: v.pipe(v.string(), v.uuid()) }),
+    responses: {
+      200: v.object({
+        id: v.pipe(v.string(), v.uuid()),
+        name: v.pipe(v.string(), v.minLength(1)),
+        email: v.pipe(v.string(), v.email()),
+      }),
+    },
+  },
+});
+```
+
+#### Arktype
+
+```ts
+import { type } from 'arktype';
+
+const contract = createContract({
+  getUser: {
+    method: 'GET',
+    path: '/users/:id',
+    pathParams: type({ id: 'string' }),
+    responses: {
+      200: type({
+        id: 'string',
+        name: 'string',
+        email: 'string.email',
+      }),
+    },
+  },
+});
+```
+
+### With Metadata
+
+```ts
+const contract = createContract({
+  getUser: {
+    method: 'GET',
+    path: '/users/:id',
+    pathParams: z.object({ id: z.string() }),
+    responses: {
+      200: z.object({ id: z.string(), name: z.string() }),
+    },
+    summary: 'Retrieve a user by ID',
+    metadata: {
+      requiresAuth: true,
+      rateLimit: 100,
+      version: 'v1',
+    },
+  },
+});
+```
+
+### With All Fields
+
+```ts
+const contract = createContract({
+  updateUser: {
+    method: 'PUT',
+    path: '/users/:id',
+    pathParams: z.object({ id: z.string() }),
+    query: z.object({ notify: z.boolean().optional() }),
+    headers: {
+      'authorization': z.string(),
+      'x-api-version': z.string(),
+    },
+    body: z.object({
+      name: z.string(),
+      email: z.string().email(),
+    }),
+    responses: {
+      200: z.object({
+        id: z.string(),
+        name: z.string(),
+        email: z.string(),
+        updatedAt: z.string(),
+      }),
+      400: z.object({ message: z.string() }),
+      401: z.object({ message: z.string() }),
+      404: z.object({ message: z.string() }),
+    },
+    summary: 'Update a user profile',
+    metadata: {
+      requiresAuth: true,
+    },
+  },
+});
+```
+
+## Best Practices
+
+### Export Contracts
+
+Export your contract for use throughout your application:
+
+```ts
+// contract.ts
+export const contract = createContract({
+  getUser: { /* ... */ },
+  createUser: { /* ... */ },
+});
+```
+
+```ts
+// Other files
+import { contract } from './contract';
+```
+
+### Use Shared Schemas
+
+Extract common schemas to avoid duplication:
+
+```ts
+const UserSchema = z.object({
+  id: z.string(),
+  name: z.string(),
+  email: z.string().email(),
+});
+
+const ErrorSchema = z.object({ message: z.string() });
+
+const contract = createContract({
+  getUser: {
+    method: 'GET',
+    path: '/users/:id',
+    pathParams: z.object({ id: z.string() }),
+    responses: {
+      200: UserSchema,
+      404: ErrorSchema,
+    },
+  },
+  createUser: {
+    method: 'POST',
+    path: '/users',
+    body: UserSchema.omit({ id: true }),
+    responses: {
+      201: UserSchema,
+      400: ErrorSchema,
+    },
+  },
+});
+```
+
+### Organize by Resource
+
+Group related routes together:
+
+```ts
+const contract = createContract({
+  users: {
+    list: { /* ... */ },
+    get: { /* ... */ },
+    create: { /* ... */ },
+    update: { /* ... */ },
+    delete: { /* ... */ },
+  },
+  posts: {
+    list: { /* ... */ },
+    get: { /* ... */ },
+    create: { /* ... */ },
+  },
+});
+```
+
+## See Also
+
+- [initContract](/api-reference/core/init-contract) - Initialize a contract with plugins
+- [Type Helpers](/api-reference/core/type-helpers) - Extract types from contracts
+- [Contracts Guide](/core-concepts/contracts) - Learn about contract organization
+- [Routes & Schemas](/core-concepts/routes-and-schemas) - Route definition details

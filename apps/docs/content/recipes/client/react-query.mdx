@@ -1,0 +1,689 @@
+---
+title: React Query Integration
+description: Integrate ts-contract with React Query for type-safe data fetching in React applications.
+---
+
+## Overview
+
+React Query (TanStack Query) is a powerful data fetching library for React. This guide shows you how to combine ts-contract with React Query for fully type-safe data fetching.
+
+## Installation
+
+```bash
+pnpm add @tanstack/react-query @ts-contract/core @ts-contract/plugins zod
+```
+
+## Complete Example
+
+### 1. Define Your Contract
+
+```ts title="contract.ts"
+import { createContract } from '@ts-contract/core';
+import { z } from 'zod';
+
+export const contract = createContract({
+  users: {
+    list: {
+      method: 'GET',
+      path: '/users',
+      query: z.object({
+        page: z.string().optional(),
+        limit: z.string().optional(),
+      }),
+      responses: {
+        200: z.object({
+          users: z.array(z.object({
+            id: z.string(),
+            name: z.string(),
+            email: z.string(),
+          })),
+          total: z.number(),
+        }),
+      },
+    },
+    get: {
+      method: 'GET',
+      path: '/users/:id',
+      pathParams: z.object({ id: z.string() }),
+      responses: {
+        200: z.object({
+          id: z.string(),
+          name: z.string(),
+          email: z.string(),
+        }),
+        404: z.object({ message: z.string() }),
+      },
+    },
+    create: {
+      method: 'POST',
+      path: '/users',
+      body: z.object({
+        name: z.string().min(1),
+        email: z.string().email(),
+      }),
+      responses: {
+        201: z.object({
+          id: z.string(),
+          name: z.string(),
+          email: z.string(),
+        }),
+        400: z.object({ message: z.string() }),
+      },
+    },
+    update: {
+      method: 'PUT',
+      path: '/users/:id',
+      pathParams: z.object({ id: z.string() }),
+      body: z.object({
+        name: z.string().min(1),
+        email: z.string().email(),
+      }),
+      responses: {
+        200: z.object({
+          id: z.string(),
+          name: z.string(),
+          email: z.string(),
+        }),
+        404: z.object({ message: z.string() }),
+      },
+    },
+    delete: {
+      method: 'DELETE',
+      path: '/users/:id',
+      pathParams: z.object({ id: z.string() }),
+      responses: {
+        204: z.null(),
+        404: z.object({ message: z.string() }),
+      },
+    },
+  },
+});
+```
+
+### 2. Initialize Contract with Plugins
+
+```ts title="api.ts"
+import { initContract } from '@ts-contract/core';
+import { pathPlugin, validatePlugin } from '@ts-contract/plugins';
+import { contract } from './contract';
+
+export const api = initContract(contract)
+  .use(pathPlugin)
+  .use(validatePlugin)
+  .build();
+```
+
+### 3. Extract Types
+
+```ts title="types.ts"
+import type { InferResponseBody, InferBody } from '@ts-contract/core';
+import { contract } from './contract';
+
+export type User = InferResponseBody<typeof contract.users.get, 200>;
+export type UserList = InferResponseBody<typeof contract.users.list, 200>;
+export type CreateUserBody = InferBody<typeof contract.users.create>;
+export type UpdateUserBody = InferBody<typeof contract.users.update>;
+```
+
+### 4. Create API Client
+
+```ts title="lib/api-client.ts"
+import { api } from './api';
+
+const API_BASE_URL = process.env.NEXT_PUBLIC_API_URL || 'http://localhost:3000';
+
+export async function fetchUser(id: string) {
+  const url = `${API_BASE_URL}${api.users.get.buildPath({ id })}`;
+  const response = await fetch(url);
+  
+  if (!response.ok) {
+    if (response.status === 404) {
+      const error = await response.json();
+      throw new Error(error.message);
+    }
+    throw new Error('Failed to fetch user');
+  }
+  
+  const data = await response.json();
+  return api.users.get.validateResponse(200, data);
+}
+
+export async function fetchUsers(page?: string, limit?: string) {
+  const url = `${API_BASE_URL}${api.users.list.buildPath(undefined, { page, limit })}`;
+  const response = await fetch(url);
+  
+  if (!response.ok) {
+    throw new Error('Failed to fetch users');
+  }
+  
+  const data = await response.json();
+  return api.users.list.validateResponse(200, data);
+}
+
+export async function createUser(body: CreateUserBody) {
+  const url = `${API_BASE_URL}${api.users.create.buildPath()}`;
+  const response = await fetch(url, {
+    method: 'POST',
+    headers: { 'Content-Type': 'application/json' },
+    body: JSON.stringify(body),
+  });
+  
+  if (!response.ok) {
+    const error = await response.json();
+    throw new Error(error.message);
+  }
+  
+  const data = await response.json();
+  return api.users.create.validateResponse(201, data);
+}
+
+export async function updateUser(id: string, body: UpdateUserBody) {
+  const url = `${API_BASE_URL}${api.users.update.buildPath({ id })}`;
+  const response = await fetch(url, {
+    method: 'PUT',
+    headers: { 'Content-Type': 'application/json' },
+    body: JSON.stringify(body),
+  });
+  
+  if (!response.ok) {
+    const error = await response.json();
+    throw new Error(error.message);
+  }
+  
+  const data = await response.json();
+  return api.users.update.validateResponse(200, data);
+}
+
+export async function deleteUser(id: string) {
+  const url = `${API_BASE_URL}${api.users.delete.buildPath({ id })}`;
+  const response = await fetch(url, {
+    method: 'DELETE',
+  });
+  
+  if (!response.ok) {
+    const error = await response.json();
+    throw new Error(error.message);
+  }
+}
+```
+
+### 5. Create React Query Hooks
+
+```ts title="hooks/use-users.ts"
+import { useQuery, useMutation, useQueryClient } from '@tanstack/react-query';
+import { fetchUser, fetchUsers, createUser, updateUser, deleteUser } from '@/lib/api-client';
+import type { User, CreateUserBody, UpdateUserBody } from '@/types';
+
+// Query keys
+export const userKeys = {
+  all: ['users'] as const,
+  lists: () => [...userKeys.all, 'list'] as const,
+  list: (page?: string, limit?: string) => [...userKeys.lists(), { page, limit }] as const,
+  details: () => [...userKeys.all, 'detail'] as const,
+  detail: (id: string) => [...userKeys.details(), id] as const,
+};
+
+// Fetch single user
+export function useUser(id: string) {
+  return useQuery({
+    queryKey: userKeys.detail(id),
+    queryFn: () => fetchUser(id),
+    enabled: !!id,
+  });
+}
+
+// Fetch user list
+export function useUsers(page?: string, limit?: string) {
+  return useQuery({
+    queryKey: userKeys.list(page, limit),
+    queryFn: () => fetchUsers(page, limit),
+  });
+}
+
+// Create user
+export function useCreateUser() {
+  const queryClient = useQueryClient();
+  
+  return useMutation({
+    mutationFn: (body: CreateUserBody) => createUser(body),
+    onSuccess: () => {
+      // Invalidate and refetch user list
+      queryClient.invalidateQueries({ queryKey: userKeys.lists() });
+    },
+  });
+}
+
+// Update user
+export function useUpdateUser() {
+  const queryClient = useQueryClient();
+  
+  return useMutation({
+    mutationFn: ({ id, body }: { id: string; body: UpdateUserBody }) =>
+      updateUser(id, body),
+    onSuccess: (data, variables) => {
+      // Update the user in the cache
+      queryClient.setQueryData(userKeys.detail(variables.id), data);
+      // Invalidate user list
+      queryClient.invalidateQueries({ queryKey: userKeys.lists() });
+    },
+  });
+}
+
+// Delete user
+export function useDeleteUser() {
+  const queryClient = useQueryClient();
+  
+  return useMutation({
+    mutationFn: (id: string) => deleteUser(id),
+    onSuccess: (_, id) => {
+      // Remove user from cache
+      queryClient.removeQueries({ queryKey: userKeys.detail(id) });
+      // Invalidate user list
+      queryClient.invalidateQueries({ queryKey: userKeys.lists() });
+    },
+  });
+}
+```
+
+### 6. Setup React Query Provider
+
+```tsx title="app/providers.tsx"
+'use client';
+
+import { QueryClient, QueryClientProvider } from '@tanstack/react-query';
+import { ReactQueryDevtools } from '@tanstack/react-query-devtools';
+import { useState } from 'react';
+
+export function Providers({ children }: { children: React.ReactNode }) {
+  const [queryClient] = useState(
+    () =>
+      new QueryClient({
+        defaultOptions: {
+          queries: {
+            staleTime: 60 * 1000, // 1 minute
+            retry: 1,
+          },
+        },
+      })
+  );
+  
+  return (
+    <QueryClientProvider client={queryClient}>
+      {children}
+      <ReactQueryDevtools initialIsOpen={false} />
+    </QueryClientProvider>
+  );
+}
+```
+
+### 7. Use in Components
+
+#### User List Component
+
+```tsx title="components/user-list.tsx"
+'use client';
+
+import { useUsers } from '@/hooks/use-users';
+
+export function UserList() {
+  const { data, isLoading, error } = useUsers();
+  
+  if (isLoading) {
+    return <div>Loading users...</div>;
+  }
+  
+  if (error) {
+    return <div>Error: {error.message}</div>;
+  }
+  
+  if (!data) {
+    return null;
+  }
+  
+  return (
+    <div>
+      <h2>Users ({data.total})</h2>
+      <ul>
+        {data.users.map((user) => (
+          <li key={user.id}>
+            {user.name} - {user.email}
+          </li>
+        ))}
+      </ul>
+    </div>
+  );
+}
+```
+
+#### User Detail Component
+
+```tsx title="components/user-detail.tsx"
+'use client';
+
+import { useUser } from '@/hooks/use-users';
+
+export function UserDetail({ id }: { id: string }) {
+  const { data: user, isLoading, error } = useUser(id);
+  
+  if (isLoading) {
+    return <div>Loading user...</div>;
+  }
+  
+  if (error) {
+    return <div>Error: {error.message}</div>;
+  }
+  
+  if (!user) {
+    return null;
+  }
+  
+  return (
+    <div>
+      <h2>{user.name}</h2>
+      <p>Email: {user.email}</p>
+      <p>ID: {user.id}</p>
+    </div>
+  );
+}
+```
+
+#### Create User Form
+
+```tsx title="components/create-user-form.tsx"
+'use client';
+
+import { useState } from 'react';
+import { useCreateUser } from '@/hooks/use-users';
+import type { CreateUserBody } from '@/types';
+
+export function CreateUserForm() {
+  const [formData, setFormData] = useState<CreateUserBody>({
+    name: '',
+    email: '',
+  });
+  
+  const createUser = useCreateUser();
+  
+  const handleSubmit = async (e: React.FormEvent) => {
+    e.preventDefault();
+    
+    try {
+      await createUser.mutateAsync(formData);
+      // Reset form
+      setFormData({ name: '', email: '' });
+    } catch (error) {
+      console.error('Failed to create user:', error);
+    }
+  };
+  
+  return (
+    <form onSubmit={handleSubmit}>
+      <div>
+        <label htmlFor="name">Name:</label>
+        <input
+          id="name"
+          type="text"
+          value={formData.name}
+          onChange={(e) => setFormData({ ...formData, name: e.target.value })}
+          required
+        />
+      </div>
+      
+      <div>
+        <label htmlFor="email">Email:</label>
+        <input
+          id="email"
+          type="email"
+          value={formData.email}
+          onChange={(e) => setFormData({ ...formData, email: e.target.value })}
+          required
+        />
+      </div>
+      
+      <button type="submit" disabled={createUser.isPending}>
+        {createUser.isPending ? 'Creating...' : 'Create User'}
+      </button>
+      
+      {createUser.isError && (
+        <div>Error: {createUser.error.message}</div>
+      )}
+      
+      {createUser.isSuccess && (
+        <div>User created successfully!</div>
+      )}
+    </form>
+  );
+}
+```
+
+#### Update User Form
+
+```tsx title="components/update-user-form.tsx"
+'use client';
+
+import { useState, useEffect } from 'react';
+import { useUser, useUpdateUser } from '@/hooks/use-users';
+import type { UpdateUserBody } from '@/types';
+
+export function UpdateUserForm({ id }: { id: string }) {
+  const { data: user } = useUser(id);
+  const updateUser = useUpdateUser();
+  
+  const [formData, setFormData] = useState<UpdateUserBody>({
+    name: '',
+    email: '',
+  });
+  
+  useEffect(() => {
+    if (user) {
+      setFormData({
+        name: user.name,
+        email: user.email,
+      });
+    }
+  }, [user]);
+  
+  const handleSubmit = async (e: React.FormEvent) => {
+    e.preventDefault();
+    
+    try {
+      await updateUser.mutateAsync({ id, body: formData });
+    } catch (error) {
+      console.error('Failed to update user:', error);
+    }
+  };
+  
+  if (!user) {
+    return <div>Loading...</div>;
+  }
+  
+  return (
+    <form onSubmit={handleSubmit}>
+      <div>
+        <label htmlFor="name">Name:</label>
+        <input
+          id="name"
+          type="text"
+          value={formData.name}
+          onChange={(e) => setFormData({ ...formData, name: e.target.value })}
+          required
+        />
+      </div>
+      
+      <div>
+        <label htmlFor="email">Email:</label>
+        <input
+          id="email"
+          type="email"
+          value={formData.email}
+          onChange={(e) => setFormData({ ...formData, email: e.target.value })}
+          required
+        />
+      </div>
+      
+      <button type="submit" disabled={updateUser.isPending}>
+        {updateUser.isPending ? 'Updating...' : 'Update User'}
+      </button>
+      
+      {updateUser.isError && (
+        <div>Error: {updateUser.error.message}</div>
+      )}
+      
+      {updateUser.isSuccess && (
+        <div>User updated successfully!</div>
+      )}
+    </form>
+  );
+}
+```
+
+#### Delete User Button
+
+```tsx title="components/delete-user-button.tsx"
+'use client';
+
+import { useDeleteUser } from '@/hooks/use-users';
+
+export function DeleteUserButton({ id }: { id: string }) {
+  const deleteUser = useDeleteUser();
+  
+  const handleDelete = async () => {
+    if (!confirm('Are you sure you want to delete this user?')) {
+      return;
+    }
+    
+    try {
+      await deleteUser.mutateAsync(id);
+    } catch (error) {
+      console.error('Failed to delete user:', error);
+    }
+  };
+  
+  return (
+    <button
+      onClick={handleDelete}
+      disabled={deleteUser.isPending}
+    >
+      {deleteUser.isPending ? 'Deleting...' : 'Delete User'}
+    </button>
+  );
+}
+```
+
+## Advanced Patterns
+
+### Optimistic Updates
+
+```ts
+export function useUpdateUser() {
+  const queryClient = useQueryClient();
+  
+  return useMutation({
+    mutationFn: ({ id, body }: { id: string; body: UpdateUserBody }) =>
+      updateUser(id, body),
+    onMutate: async ({ id, body }) => {
+      // Cancel outgoing refetches
+      await queryClient.cancelQueries({ queryKey: userKeys.detail(id) });
+      
+      // Snapshot previous value
+      const previousUser = queryClient.getQueryData(userKeys.detail(id));
+      
+      // Optimistically update
+      queryClient.setQueryData(userKeys.detail(id), (old: User | undefined) => {
+        if (!old) return old;
+        return { ...old, ...body };
+      });
+      
+      return { previousUser };
+    },
+    onError: (err, variables, context) => {
+      // Rollback on error
+      if (context?.previousUser) {
+        queryClient.setQueryData(
+          userKeys.detail(variables.id),
+          context.previousUser
+        );
+      }
+    },
+    onSettled: (data, error, variables) => {
+      // Refetch after error or success
+      queryClient.invalidateQueries({ queryKey: userKeys.detail(variables.id) });
+    },
+  });
+}
+```
+
+### Infinite Queries
+
+```ts
+export function useInfiniteUsers(limit: string = '10') {
+  return useInfiniteQuery({
+    queryKey: [...userKeys.lists(), 'infinite', limit],
+    queryFn: ({ pageParam = '1' }) => fetchUsers(pageParam, limit),
+    getNextPageParam: (lastPage, allPages) => {
+      const nextPage = allPages.length + 1;
+      return lastPage.users.length === parseInt(limit) ? String(nextPage) : undefined;
+    },
+    initialPageParam: '1',
+  });
+}
+```
+
+### Prefetching
+
+```ts
+export function usePrefetchUser(id: string) {
+  const queryClient = useQueryClient();
+  
+  return () => {
+    queryClient.prefetchQuery({
+      queryKey: userKeys.detail(id),
+      queryFn: () => fetchUser(id),
+    });
+  };
+}
+```
+
+## Best Practices
+
+1. **Organize query keys**: Use a consistent query key factory
+2. **Type everything**: Leverage inferred types from your contract
+3. **Handle loading states**: Show loading indicators
+4. **Handle errors**: Display error messages to users
+5. **Invalidate wisely**: Only invalidate queries that need refetching
+6. **Use optimistic updates**: For better UX on mutations
+
+## Project Structure
+
+```
+my-app/
+├── app/
+│   ├── providers.tsx
+│   └── page.tsx
+├── components/
+│   ├── user-list.tsx
+│   ├── user-detail.tsx
+│   ├── create-user-form.tsx
+│   └── update-user-form.tsx
+├── hooks/
+│   └── use-users.ts
+├── lib/
+│   ├── contract.ts
+│   ├── api.ts
+│   ├── api-client.ts
+│   └── types.ts
+└── package.json
+```
+
+## Next Steps
+
+- Implement [error handling](/recipes/advanced/error-handling) patterns
+- Add [authentication](/recipes/advanced/auth) to API calls
+- Create a [monorepo](/recipes/full-stack/monorepo) with shared contracts
+- Optimize with [prefetching and caching](/recipes/advanced/caching)
+
+## See Also
+
+- [Vanilla Fetch Integration](/recipes/client/vanilla-fetch) - Pure fetch alternative
+- [Path Plugin](/plugins/path-plugin) - URL building
+- [Validate Plugin](/plugins/validate-plugin) - Response validation

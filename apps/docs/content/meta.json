@@ -1,3 +1,12 @@
 {
-  "pages": ["index", "getting-started", "---Documentation---", "contract"]
+  "pages": [
+    "index",
+    "getting-started",
+    "---Documentation---",
+    "core-concepts",
+    "plugins",
+    "api-reference",
+    "recipes",
+    "guides"
+  ]
 }

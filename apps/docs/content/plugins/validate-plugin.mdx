@@ -1,0 +1,654 @@
+---
+title: Validate Plugin
+description: Runtime schema validation for requests and responses using the validatePlugin.
+---
+
+## Overview
+
+The `validatePlugin` adds validation methods to each route in your contract, enabling runtime schema validation for path parameters, query strings, request bodies, headers, and responses.
+
+## Installation
+
+The validate plugin is included in `@ts-contract/plugins`:
+
+```bash
+pnpm add @ts-contract/plugins
+```
+
+## Basic Usage
+
+Add the plugin to your contract using `initContract()`:
+
+```ts
+import { createContract, initContract } from '@ts-contract/core';
+import { validatePlugin } from '@ts-contract/plugins';
+import { z } from 'zod';
+
+const contract = createContract({
+  createUser: {
+    method: 'POST',
+    path: '/users',
+    body: z.object({
+      name: z.string(),
+      email: z.string().email(),
+    }),
+    responses: {
+      201: z.object({
+        id: z.string(),
+        name: z.string(),
+        email: z.string(),
+      }),
+    },
+  },
+});
+
+const api = initContract(contract)
+  .use(validatePlugin)
+  .build();
+
+// Validate request body
+const body = api.createUser.validateBody({
+  name: 'Alice',
+  email: 'alice@example.com',
+});
+
+// Validate response
+const user = api.createUser.validateResponse(201, {
+  id: '123',
+  name: 'Alice',
+  email: 'alice@example.com',
+});
+```
+
+## Validation Methods
+
+The validate plugin adds five validation methods to each route:
+
+### validatePathParams()
+
+Validates path parameters against the route's `pathParams` schema.
+
+```ts
+validatePathParams(params: unknown): InferPathParams<Route>
+```
+
+**Example:**
+
+```ts
+const contract = createContract({
+  getUser: {
+    method: 'GET',
+    path: '/users/:id',
+    pathParams: z.object({ id: z.string().uuid() }),
+    responses: {
+      200: z.object({ id: z.string(), name: z.string() }),
+    },
+  },
+});
+
+const api = initContract(contract).use(validatePlugin).build();
+
+// ✓ Valid
+const params = api.getUser.validatePathParams({ id: '550e8400-e29b-41d4-a716-446655440000' });
+// => { id: '550e8400-e29b-41d4-a716-446655440000' }
+
+// ✗ Throws validation error
+api.getUser.validatePathParams({ id: 'not-a-uuid' });
+```
+
+### validateQuery()
+
+Validates query string parameters against the route's `query` schema.
+
+```ts
+validateQuery(query: unknown): InferQuery<Route>
+```
+
+**Example:**
+
+```ts
+const contract = createContract({
+  listUsers: {
+    method: 'GET',
+    path: '/users',
+    query: z.object({
+      page: z.string().transform(Number),
+      limit: z.string().transform(Number).optional(),
+    }),
+    responses: {
+      200: z.array(z.object({ id: z.string() })),
+    },
+  },
+});
+
+const api = initContract(contract).use(validatePlugin).build();
+
+// ✓ Valid - transforms strings to numbers
+const query = api.listUsers.validateQuery({ page: '2', limit: '10' });
+// => { page: 2, limit: 10 }
+
+// ✗ Throws validation error
+api.listUsers.validateQuery({ page: 'invalid' });
+```
+
+### validateBody()
+
+Validates request body against the route's `body` schema.
+
+```ts
+validateBody(body: unknown): InferBody<Route>
+```
+
+**Example:**
+
+```ts
+const contract = createContract({
+  createUser: {
+    method: 'POST',
+    path: '/users',
+    body: z.object({
+      name: z.string().min(1),
+      email: z.string().email(),
+      age: z.number().int().min(0).optional(),
+    }),
+    responses: {
+      201: z.object({ id: z.string() }),
+    },
+  },
+});
+
+const api = initContract(contract).use(validatePlugin).build();
+
+// ✓ Valid
+const body = api.createUser.validateBody({
+  name: 'Alice',
+  email: 'alice@example.com',
+  age: 30,
+});
+
+// ✗ Throws validation error - invalid email
+api.createUser.validateBody({
+  name: 'Alice',
+  email: 'not-an-email',
+});
+```
+
+### validateResponse()
+
+Validates response data against the route's response schema for a specific status code.
+
+```ts
+validateResponse<Status>(status: Status, data: unknown): InferResponseBody<Route, Status>
+```
+
+**Example:**
+
+```ts
+const contract = createContract({
+  getUser: {
+    method: 'GET',
+    path: '/users/:id',
+    pathParams: z.object({ id: z.string() }),
+    responses: {
+      200: z.object({
+        id: z.string(),
+        name: z.string(),
+        email: z.string().email(),
+      }),
+      404: z.object({
+        message: z.string(),
+      }),
+    },
+  },
+});
+
+const api = initContract(contract).use(validatePlugin).build();
+
+// ✓ Valid - 200 response
+const user = api.getUser.validateResponse(200, {
+  id: '123',
+  name: 'Alice',
+  email: 'alice@example.com',
+});
+
+// ✓ Valid - 404 response
+const error = api.getUser.validateResponse(404, {
+  message: 'User not found',
+});
+
+// ✗ Throws validation error - wrong schema for status
+api.getUser.validateResponse(200, {
+  message: 'User not found',
+});
+```
+
+### validateHeaders()
+
+Validates request headers against the route's `headers` schema.
+
+```ts
+validateHeaders(headers: Record<string, unknown>): InferHeaders<Route>
+```
+
+**Example:**
+
+```ts
+const contract = createContract({
+  getProtected: {
+    method: 'GET',
+    path: '/protected',
+    headers: {
+      'authorization': z.string().startsWith('Bearer '),
+      'x-api-key': z.string(),
+    },
+    responses: {
+      200: z.object({ data: z.string() }),
+    },
+  },
+});
+
+const api = initContract(contract).use(validatePlugin).build();
+
+// ✓ Valid
+const headers = api.getProtected.validateHeaders({
+  'authorization': 'Bearer token123',
+  'x-api-key': 'key123',
+});
+
+// ✗ Throws validation error
+api.getProtected.validateHeaders({
+  'authorization': 'token123', // Missing "Bearer " prefix
+  'x-api-key': 'key123',
+});
+```
+
+## Error Handling
+
+Validation errors throw with descriptive messages:
+
+```ts
+try {
+  api.createUser.validateBody({
+    name: '',
+    email: 'invalid-email',
+  });
+} catch (error) {
+  console.error(error.message);
+  // => "Validation failed for body of /users: String must contain at least 1 character(s), Invalid email"
+}
+```
+
+Error messages include:
+- What failed (pathParams, query, body, response, headers)
+- Which route (path)
+- Specific validation issues from your schema library
+
+## Integration with Standard Schema
+
+The validate plugin works with any schema library that implements [@standard-schema/spec](https://github.com/standard-schema/standard-schema):
+
+### Zod
+
+```ts
+import { z } from 'zod';
+
+const contract = createContract({
+  createUser: {
+    method: 'POST',
+    path: '/users',
+    body: z.object({
+      name: z.string().min(1),
+      email: z.string().email(),
+    }),
+    responses: {
+      201: z.object({ id: z.string() }),
+    },
+  },
+});
+```
+
+### Valibot
+
+```ts
+import * as v from 'valibot';
+
+const contract = createContract({
+  createUser: {
+    method: 'POST',
+    path: '/users',
+    body: v.object({
+      name: v.pipe(v.string(), v.minLength(1)),
+      email: v.pipe(v.string(), v.email()),
+    }),
+    responses: {
+      201: v.object({ id: v.string() }),
+    },
+  },
+});
+```
+
+### Arktype
+
+```ts
+import { type } from 'arktype';
+
+const contract = createContract({
+  createUser: {
+    method: 'POST',
+    path: '/users',
+    body: type({
+      name: 'string',
+      email: 'string.email',
+    }),
+    responses: {
+      201: type({ id: 'string' }),
+    },
+  },
+});
+```
+
+## Server-Side Validation
+
+Use validation methods to validate incoming request data:
+
+```ts
+import express from 'express';
+
+const app = express();
+app.use(express.json());
+
+app.post('/users', (req, res) => {
+  try {
+    // Validate request body
+    const body = api.createUser.validateBody(req.body);
+    
+    // Create user with validated data
+    const user = database.createUser(body);
+    
+    res.status(201).json(user);
+  } catch (error) {
+    res.status(400).json({ message: error.message });
+  }
+});
+
+app.get('/users/:id', (req, res) => {
+  try {
+    // Validate path parameters
+    const params = api.getUser.validatePathParams(req.params);
+    
+    const user = database.findUser(params.id);
+    
+    if (!user) {
+      return res.status(404).json({ message: 'User not found' });
+    }
+    
+    res.json(user);
+  } catch (error) {
+    res.status(400).json({ message: error.message });
+  }
+});
+```
+
+## Client-Side Validation
+
+Validate API responses to ensure type safety:
+
+```ts
+async function fetchUser(id: string) {
+  const url = api.getUser.buildPath({ id });
+  const response = await fetch(url);
+  
+  if (!response.ok) {
+    if (response.status === 404) {
+      const error = api.getUser.validateResponse(404, await response.json());
+      throw new Error(error.message);
+    }
+    throw new Error('Request failed');
+  }
+  
+  const data = await response.json();
+  
+  // Validate response data
+  return api.getUser.validateResponse(200, data);
+}
+```
+
+## Common Patterns
+
+### Express Middleware
+
+Create reusable validation middleware:
+
+```ts
+function validateBody(route: any) {
+  return (req: express.Request, res: express.Response, next: express.NextFunction) => {
+    try {
+      req.body = route.validateBody(req.body);
+      next();
+    } catch (error) {
+      res.status(400).json({ message: error.message });
+    }
+  };
+}
+
+app.post('/users', validateBody(api.createUser), (req, res) => {
+  const user = database.createUser(req.body);
+  res.status(201).json(user);
+});
+```
+
+### React Query with Validation
+
+```ts
+import { useQuery } from '@tanstack/react-query';
+
+function useUser(id: string) {
+  return useQuery({
+    queryKey: ['user', id],
+    queryFn: async () => {
+      const url = api.getUser.buildPath({ id });
+      const response = await fetch(url);
+      const data = await response.json();
+      
+      // Validate response
+      return api.getUser.validateResponse(200, data);
+    },
+  });
+}
+```
+
+### Conditional Validation
+
+Only validate in development:
+
+```ts
+async function fetchUser(id: string) {
+  const response = await fetch(api.getUser.buildPath({ id }));
+  const data = await response.json();
+  
+  if (process.env.NODE_ENV === 'development') {
+    return api.getUser.validateResponse(200, data);
+  }
+  
+  return data;
+}
+```
+
+### Type-Safe Error Responses
+
+```ts
+async function fetchUser(id: string) {
+  const response = await fetch(api.getUser.buildPath({ id }));
+  const data = await response.json();
+  
+  if (response.status === 404) {
+    const error = api.getUser.validateResponse(404, data);
+    throw new Error(error.message);
+  }
+  
+  if (!response.ok) {
+    throw new Error('Request failed');
+  }
+  
+  return api.getUser.validateResponse(200, data);
+}
+```
+
+## Performance Considerations
+
+### Validation Overhead
+
+Validation has runtime cost that depends on your schema library:
+
+- **Zod**: ~10-50ms for typical schemas
+- **Valibot**: ~5-20ms (faster than Zod)
+- **Arktype**: ~5-15ms (fastest)
+
+### When to Validate
+
+**Always validate:**
+- ✅ User input
+- ✅ External API responses
+- ✅ Untrusted data sources
+
+**Consider skipping:**
+- ❌ Internal service communication (if trusted)
+- ❌ Production client responses (if API is stable)
+- ❌ High-frequency operations (if performance critical)
+
+### Optimization Strategies
+
+**1. Validate at boundaries only:**
+
+```ts
+// Validate once at the boundary
+const user = api.getUser.validateResponse(200, externalData);
+
+// Use validated data internally without re-validating
+processUser(user);
+saveUser(user);
+```
+
+**2. Use faster schema libraries:**
+
+```ts
+// Valibot is faster than Zod
+import * as v from 'valibot';
+
+const contract = createContract({
+  getUser: {
+    method: 'GET',
+    path: '/users/:id',
+    pathParams: v.object({ id: v.string() }),
+    responses: {
+      200: v.object({ id: v.string(), name: v.string() }),
+    },
+  },
+});
+```
+
+**3. Conditional validation:**
+
+```ts
+const shouldValidate = process.env.NODE_ENV !== 'production';
+
+async function fetchUser(id: string) {
+  const response = await fetch(api.getUser.buildPath({ id }));
+  const data = await response.json();
+  
+  return shouldValidate 
+    ? api.getUser.validateResponse(200, data)
+    : data;
+}
+```
+
+## Comparison with Manual Validation
+
+### With validatePlugin
+
+```ts
+const user = api.createUser.validateBody(req.body);
+```
+
+**Pros:**
+- ✅ Automatic validation
+- ✅ Type-safe output
+- ✅ Consistent error messages
+- ✅ Less boilerplate
+
+### Without validatePlugin (Manual)
+
+```ts
+const result = UserSchema.safeParse(req.body);
+if (!result.success) {
+  throw new Error('Validation failed');
+}
+const user = result.data;
+```
+
+**Pros:**
+- ✅ More control over error handling
+- ✅ Can use library-specific features
+
+**Cons:**
+- ❌ More boilerplate
+- ❌ Need to import schemas separately
+- ❌ Repetitive code
+
+## Troubleshooting
+
+### "Route has no [field] schema" Error
+
+**Problem:** Trying to validate a field that doesn't exist in the route.
+
+**Solution:** Ensure your route defines the schema you're trying to validate:
+
+```ts
+// ✗ Error - no body schema
+const contract = createContract({
+  getUser: {
+    method: 'GET',
+    path: '/users/:id',
+    responses: { 200: z.object({ id: z.string() }) },
+  },
+});
+
+api.getUser.validateBody(data); // Error!
+
+// ✓ Correct - body schema defined
+const contract = createContract({
+  createUser: {
+    method: 'POST',
+    path: '/users',
+    body: z.object({ name: z.string() }), // ← Add this
+    responses: { 201: z.object({ id: z.string() }) },
+  },
+});
+
+api.createUser.validateBody(data); // Works!
+```
+
+### Validation Passes but TypeScript Errors
+
+**Problem:** Validation succeeds at runtime but TypeScript shows errors.
+
+**Solution:** Make sure you're using the validated result, not the original data:
+
+```ts
+// ✗ Wrong - using original data
+const data = await response.json();
+api.getUser.validateResponse(200, data);
+console.log(data.name); // TypeScript error
+
+// ✓ Correct - using validated result
+const data = await response.json();
+const user = api.getUser.validateResponse(200, data);
+console.log(user.name); // TypeScript knows this exists
+```
+
+## Next Steps
+
+- Learn about [Path Plugin](/plugins/path-plugin) for URL building
+- See [Creating Custom Plugins](/plugins/creating-custom-plugins) to build your own
+- Explore [Recipes](/recipes/server/express) for real-world validation examples
+- Review [Plugin System](/core-concepts/plugin-system) for how plugins work

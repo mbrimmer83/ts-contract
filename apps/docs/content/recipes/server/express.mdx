@@ -1,0 +1,621 @@
+---
+title: Express Integration
+description: Integrate ts-contract with Express for type-safe server-side routing.
+---
+
+## Overview
+
+Express is the most popular Node.js web framework. This guide shows you how to integrate ts-contract with Express for end-to-end type safety.
+
+## Installation
+
+```bash
+pnpm add express @ts-contract/core @ts-contract/plugins zod
+pnpm add -D @types/express
+```
+
+## Complete Example
+
+### 1. Define Your Contract
+
+```ts title="contract.ts"
+import { createContract } from '@ts-contract/core';
+import { z } from 'zod';
+
+export const contract = createContract({
+  users: {
+    list: {
+      method: 'GET',
+      path: '/users',
+      query: z.object({
+        page: z.string().optional(),
+        limit: z.string().optional(),
+      }),
+      responses: {
+        200: z.object({
+          users: z.array(z.object({
+            id: z.string(),
+            name: z.string(),
+            email: z.string(),
+          })),
+          total: z.number(),
+        }),
+      },
+    },
+    get: {
+      method: 'GET',
+      path: '/users/:id',
+      pathParams: z.object({ id: z.string() }),
+      responses: {
+        200: z.object({
+          id: z.string(),
+          name: z.string(),
+          email: z.string(),
+        }),
+        404: z.object({ message: z.string() }),
+      },
+    },
+    create: {
+      method: 'POST',
+      path: '/users',
+      body: z.object({
+        name: z.string().min(1),
+        email: z.string().email(),
+      }),
+      responses: {
+        201: z.object({
+          id: z.string(),
+          name: z.string(),
+          email: z.string(),
+        }),
+        400: z.object({ message: z.string() }),
+      },
+    },
+    update: {
+      method: 'PUT',
+      path: '/users/:id',
+      pathParams: z.object({ id: z.string() }),
+      body: z.object({
+        name: z.string().min(1),
+        email: z.string().email(),
+      }),
+      responses: {
+        200: z.object({
+          id: z.string(),
+          name: z.string(),
+          email: z.string(),
+        }),
+        404: z.object({ message: z.string() }),
+      },
+    },
+    delete: {
+      method: 'DELETE',
+      path: '/users/:id',
+      pathParams: z.object({ id: z.string() }),
+      responses: {
+        204: z.null(),
+        404: z.object({ message: z.string() }),
+      },
+    },
+  },
+});
+```
+
+### 2. Initialize Contract with Plugins
+
+```ts title="api.ts"
+import { initContract } from '@ts-contract/core';
+import { validatePlugin } from '@ts-contract/plugins';
+import { contract } from './contract';
+
+export const api = initContract(contract)
+  .use(validatePlugin)
+  .build();
+```
+
+### 3. Extract Types
+
+```ts title="types.ts"
+import type { InferPathParams, InferQuery, InferBody, InferResponseBody } from '@ts-contract/core';
+import { contract } from './contract';
+
+export type ListUsersQuery = InferQuery<typeof contract.users.list>;
+export type ListUsersResponse = InferResponseBody<typeof contract.users.list, 200>;
+
+export type GetUserParams = InferPathParams<typeof contract.users.get>;
+export type User = InferResponseBody<typeof contract.users.get, 200>;
+export type UserNotFound = InferResponseBody<typeof contract.users.get, 404>;
+
+export type CreateUserBody = InferBody<typeof contract.users.create>;
+export type CreateUserResponse = InferResponseBody<typeof contract.users.create, 201>;
+
+export type UpdateUserParams = InferPathParams<typeof contract.users.update>;
+export type UpdateUserBody = InferBody<typeof contract.users.update>;
+
+export type DeleteUserParams = InferPathParams<typeof contract.users.delete>;
+```
+
+### 4. Implement Server
+
+```ts title="server.ts"
+import express, { Request, Response } from 'express';
+import { api } from './api';
+import type {
+  GetUserParams,
+  User,
+  UserNotFound,
+  CreateUserBody,
+  CreateUserResponse,
+  UpdateUserParams,
+  UpdateUserBody,
+  DeleteUserParams,
+} from './types';
+
+const app = express();
+
+// Middleware
+app.use(express.json());
+
+// In-memory database (replace with real database)
+const users = new Map<string, User>([
+  ['1', { id: '1', name: 'Alice', email: 'alice@example.com' }],
+  ['2', { id: '2', name: 'Bob', email: 'bob@example.com' }],
+]);
+
+// List users
+app.get('/users', (req: Request, res: Response) => {
+  const page = parseInt(req.query.page as string || '1');
+  const limit = parseInt(req.query.limit as string || '10');
+  
+  const allUsers = Array.from(users.values());
+  const start = (page - 1) * limit;
+  const paginatedUsers = allUsers.slice(start, start + limit);
+  
+  res.json({
+    users: paginatedUsers,
+    total: allUsers.length,
+  });
+});
+
+// Get user by ID
+app.get('/users/:id', (req: Request, res: Response) => {
+  const { id } = req.params as GetUserParams;
+  
+  const user = users.get(id);
+  
+  if (!user) {
+    const response: UserNotFound = { message: 'User not found' };
+    return res.status(404).json(response);
+  }
+  
+  res.json(user);
+});
+
+// Create user
+app.post('/users', (req: Request, res: Response) => {
+  try {
+    const body = api.users.create.validateBody(req.body) as CreateUserBody;
+    
+    const id = String(users.size + 1);
+    const newUser: User = {
+      id,
+      ...body,
+    };
+    
+    users.set(id, newUser);
+    
+    const response: CreateUserResponse = newUser;
+    res.status(201).json(response);
+  } catch (error: any) {
+    res.status(400).json({ message: error.message });
+  }
+});
+
+// Update user
+app.put('/users/:id', (req: Request, res: Response) => {
+  try {
+    const { id } = req.params as UpdateUserParams;
+    const body = api.users.update.validateBody(req.body) as UpdateUserBody;
+    
+    const existingUser = users.get(id);
+    
+    if (!existingUser) {
+      return res.status(404).json({ message: 'User not found' });
+    }
+    
+    const updatedUser: User = {
+      id,
+      ...body,
+    };
+    
+    users.set(id, updatedUser);
+    
+    res.json(updatedUser);
+  } catch (error: any) {
+    res.status(400).json({ message: error.message });
+  }
+});
+
+// Delete user
+app.delete('/users/:id', (req: Request, res: Response) => {
+  const { id } = req.params as DeleteUserParams;
+  
+  if (!users.has(id)) {
+    return res.status(404).json({ message: 'User not found' });
+  }
+  
+  users.delete(id);
+  
+  res.status(204).send();
+});
+
+export default app;
+```
+
+### 5. Start the Server
+
+```ts title="index.ts"
+import app from './server';
+
+const PORT = process.env.PORT || 3000;
+
+app.listen(PORT, () => {
+  console.log(`Server running on http://localhost:${PORT}`);
+});
+```
+
+## Validation Middleware
+
+Create reusable validation middleware:
+
+```ts title="middleware/validation.ts"
+import { Request, Response, NextFunction } from 'express';
+
+export function validateBody(route: any) {
+  return (req: Request, res: Response, next: NextFunction) => {
+    try {
+      req.body = route.validateBody(req.body);
+      next();
+    } catch (error: any) {
+      res.status(400).json({ message: error.message });
+    }
+  };
+}
+
+export function validateParams(route: any) {
+  return (req: Request, res: Response, next: NextFunction) => {
+    try {
+      req.params = route.validatePathParams(req.params);
+      next();
+    } catch (error: any) {
+      res.status(400).json({ message: error.message });
+    }
+  };
+}
+
+export function validateQuery(route: any) {
+  return (req: Request, res: Response, next: NextFunction) => {
+    try {
+      req.query = route.validateQuery(req.query);
+      next();
+    } catch (error: any) {
+      res.status(400).json({ message: error.message });
+    }
+  };
+}
+```
+
+**Usage:**
+
+```ts
+import { validateBody, validateParams } from './middleware/validation';
+
+app.post('/users', validateBody(api.users.create), (req, res) => {
+  const body = req.body; // Already validated
+  // ...
+});
+
+app.get('/users/:id', validateParams(api.users.get), (req, res) => {
+  const { id } = req.params; // Already validated
+  // ...
+});
+```
+
+## Error Handling Middleware
+
+```ts title="middleware/error-handler.ts"
+import { Request, Response, NextFunction } from 'express';
+
+export function errorHandler(
+  err: Error,
+  req: Request,
+  res: Response,
+  next: NextFunction
+) {
+  console.error('Error:', err);
+  
+  if (err.name === 'ZodError') {
+    return res.status(400).json({
+      message: 'Validation error',
+      errors: err.errors,
+    });
+  }
+  
+  res.status(500).json({ message: 'Internal server error' });
+}
+```
+
+**Usage:**
+
+```ts
+import { errorHandler } from './middleware/error-handler';
+
+// Add at the end of your middleware chain
+app.use(errorHandler);
+```
+
+## Async Handler Wrapper
+
+Wrap async route handlers to catch errors:
+
+```ts title="utils/async-handler.ts"
+import { Request, Response, NextFunction } from 'express';
+
+export function asyncHandler(
+  fn: (req: Request, res: Response, next: NextFunction) => Promise<any>
+) {
+  return (req: Request, res: Response, next: NextFunction) => {
+    Promise.resolve(fn(req, res, next)).catch(next);
+  };
+}
+```
+
+**Usage:**
+
+```ts
+import { asyncHandler } from './utils/async-handler';
+
+app.post('/users', asyncHandler(async (req, res) => {
+  const body = api.users.create.validateBody(req.body);
+  
+  // Async operations
+  const user = await database.createUser(body);
+  
+  res.status(201).json(user);
+}));
+```
+
+## CORS Configuration
+
+```ts title="middleware/cors.ts"
+import cors from 'cors';
+
+export const corsMiddleware = cors({
+  origin: process.env.ALLOWED_ORIGINS?.split(',') || ['http://localhost:5173'],
+  credentials: true,
+  methods: ['GET', 'POST', 'PUT', 'DELETE', 'OPTIONS'],
+  allowedHeaders: ['Content-Type', 'Authorization'],
+});
+```
+
+**Usage:**
+
+```ts
+import { corsMiddleware } from './middleware/cors';
+
+app.use(corsMiddleware);
+```
+
+## Authentication Middleware
+
+```ts title="middleware/auth.ts"
+import { Request, Response, NextFunction } from 'express';
+
+export interface AuthRequest extends Request {
+  user?: {
+    id: string;
+    email: string;
+  };
+}
+
+export async function requireAuth(
+  req: AuthRequest,
+  res: Response,
+  next: NextFunction
+) {
+  const authHeader = req.headers.authorization;
+  
+  if (!authHeader?.startsWith('Bearer ')) {
+    return res.status(401).json({ message: 'Unauthorized' });
+  }
+  
+  const token = authHeader.substring(7);
+  
+  try {
+    // Verify token (replace with your auth logic)
+    const user = await verifyToken(token);
+    req.user = user;
+    next();
+  } catch (error) {
+    res.status(401).json({ message: 'Invalid token' });
+  }
+}
+
+async function verifyToken(token: string) {
+  // Implement your token verification logic
+  // This is just a placeholder
+  return { id: '1', email: 'user@example.com' };
+}
+```
+
+**Usage:**
+
+```ts
+import { requireAuth, AuthRequest } from './middleware/auth';
+
+app.get('/users/:id', requireAuth, (req: AuthRequest, res) => {
+  const user = req.user; // Authenticated user
+  // ...
+});
+```
+
+## Request Logging
+
+```ts title="middleware/logger.ts"
+import { Request, Response, NextFunction } from 'express';
+
+export function logger(req: Request, res: Response, next: NextFunction) {
+  const start = Date.now();
+  
+  res.on('finish', () => {
+    const duration = Date.now() - start;
+    console.log(
+      `${req.method} ${req.path} ${res.statusCode} - ${duration}ms`
+    );
+  });
+  
+  next();
+}
+```
+
+## Rate Limiting
+
+```ts
+import rateLimit from 'express-rate-limit';
+
+const limiter = rateLimit({
+  windowMs: 15 * 60 * 1000, // 15 minutes
+  max: 100, // Limit each IP to 100 requests per windowMs
+  message: 'Too many requests, please try again later',
+});
+
+app.use('/api/', limiter);
+```
+
+## Testing
+
+```ts title="server.test.ts"
+import request from 'supertest';
+import { describe, it, expect } from 'vitest';
+import app from './server';
+
+describe('User API', () => {
+  it('should list users', async () => {
+    const res = await request(app).get('/users');
+    
+    expect(res.status).toBe(200);
+    expect(res.body.users).toBeInstanceOf(Array);
+  });
+  
+  it('should get user by id', async () => {
+    const res = await request(app).get('/users/1');
+    
+    expect(res.status).toBe(200);
+    expect(res.body.id).toBe('1');
+  });
+  
+  it('should return 404 for non-existent user', async () => {
+    const res = await request(app).get('/users/999');
+    
+    expect(res.status).toBe(404);
+  });
+  
+  it('should create user', async () => {
+    const res = await request(app)
+      .post('/users')
+      .send({
+        name: 'Charlie',
+        email: 'charlie@example.com',
+      });
+    
+    expect(res.status).toBe(201);
+    expect(res.body.name).toBe('Charlie');
+  });
+  
+  it('should validate request body', async () => {
+    const res = await request(app)
+      .post('/users')
+      .send({
+        name: '',
+        email: 'invalid-email',
+      });
+    
+    expect(res.status).toBe(400);
+  });
+});
+```
+
+## Complete Server Setup
+
+```ts title="server.ts"
+import express from 'express';
+import { corsMiddleware } from './middleware/cors';
+import { logger } from './middleware/logger';
+import { errorHandler } from './middleware/error-handler';
+import userRoutes from './routes/users';
+
+const app = express();
+
+// Middleware
+app.use(express.json());
+app.use(corsMiddleware);
+app.use(logger);
+
+// Routes
+app.use('/users', userRoutes);
+
+// Health check
+app.get('/health', (req, res) => {
+  res.json({ status: 'ok' });
+});
+
+// Error handling (must be last)
+app.use(errorHandler);
+
+export default app;
+```
+
+## Project Structure
+
+```
+my-api/
+├── src/
+│   ├── contract.ts           # Contract definition
+│   ├── api.ts                # Contract with plugins
+│   ├── types.ts              # Inferred types
+│   ├── server.ts             # Express app
+│   ├── index.ts              # Entry point
+│   ├── middleware/
+│   │   ├── auth.ts
+│   │   ├── cors.ts
+│   │   ├── error-handler.ts
+│   │   ├── logger.ts
+│   │   └── validation.ts
+│   ├── routes/
+│   │   └── users.ts
+│   └── utils/
+│       └── async-handler.ts
+├── package.json
+└── tsconfig.json
+```
+
+## Best Practices
+
+1. **Use middleware**: Leverage Express middleware for cross-cutting concerns
+2. **Validate early**: Use validation middleware to catch errors early
+3. **Handle async errors**: Use async handler wrapper or try-catch
+4. **Type everything**: Use inferred types from your contract
+5. **Separate routes**: Split routes into separate files for better organization
+
+## Next Steps
+
+- Add [authentication](/recipes/advanced/auth) to protect routes
+- Implement [error handling](/recipes/advanced/error-handling) patterns
+- Set up [React Query client](/recipes/client/react-query) for the frontend
+- Create a [monorepo](/recipes/full-stack/monorepo) with shared contracts
+
+## See Also
+
+- [Hono Integration](/recipes/server/hono) - Lightweight alternative
+- [Fastify Integration](/recipes/server/fastify) - High-performance alternative
+- [Validate Plugin](/plugins/validate-plugin) - Runtime validation details

@@ -1,0 +1,516 @@
+---
+title: Hono Integration
+description: Integrate ts-contract with Hono for type-safe server-side routing.
+---
+
+## Overview
+
+Hono is a lightweight, ultrafast web framework that works great with ts-contract. This guide shows you how to build a fully type-safe API using Hono and ts-contract.
+
+## Why Hono + ts-contract?
+
+- **Lightweight**: Hono is tiny (~12KB) and extremely fast
+- **Type-safe**: Both Hono and ts-contract prioritize TypeScript
+- **Flexible**: No lock-in - use ts-contract for contracts, Hono for routing
+- **Modern**: Built for edge runtimes (Cloudflare Workers, Deno, Bun)
+
+## Installation
+
+```bash
+pnpm add hono @ts-contract/core @ts-contract/plugins zod
+```
+
+## Complete Example
+
+### 1. Define Your Contract
+
+```ts title="contract.ts"
+import { createContract } from '@ts-contract/core';
+import { z } from 'zod';
+
+export const contract = createContract({
+  users: {
+    list: {
+      method: 'GET',
+      path: '/users',
+      query: z.object({
+        page: z.string().optional(),
+        limit: z.string().optional(),
+      }),
+      responses: {
+        200: z.object({
+          users: z.array(z.object({
+            id: z.string(),
+            name: z.string(),
+            email: z.string(),
+          })),
+          total: z.number(),
+        }),
+      },
+    },
+    get: {
+      method: 'GET',
+      path: '/users/:id',
+      pathParams: z.object({ id: z.string() }),
+      responses: {
+        200: z.object({
+          id: z.string(),
+          name: z.string(),
+          email: z.string(),
+        }),
+        404: z.object({ message: z.string() }),
+      },
+    },
+    create: {
+      method: 'POST',
+      path: '/users',
+      body: z.object({
+        name: z.string().min(1),
+        email: z.string().email(),
+      }),
+      responses: {
+        201: z.object({
+          id: z.string(),
+          name: z.string(),
+          email: z.string(),
+        }),
+        400: z.object({ message: z.string() }),
+      },
+    },
+    update: {
+      method: 'PUT',
+      path: '/users/:id',
+      pathParams: z.object({ id: z.string() }),
+      body: z.object({
+        name: z.string().min(1),
+        email: z.string().email(),
+      }),
+      responses: {
+        200: z.object({
+          id: z.string(),
+          name: z.string(),
+          email: z.string(),
+        }),
+        404: z.object({ message: z.string() }),
+      },
+    },
+    delete: {
+      method: 'DELETE',
+      path: '/users/:id',
+      pathParams: z.object({ id: z.string() }),
+      responses: {
+        204: z.null(),
+        404: z.object({ message: z.string() }),
+      },
+    },
+  },
+});
+```
+
+### 2. Initialize Contract with Plugins
+
+```ts title="api.ts"
+import { initContract } from '@ts-contract/core';
+import { validatePlugin } from '@ts-contract/plugins';
+import { contract } from './contract';
+
+export const api = initContract(contract)
+  .use(validatePlugin)
+  .build();
+```
+
+### 3. Extract Types
+
+```ts title="types.ts"
+import type { InferPathParams, InferBody, InferResponseBody } from '@ts-contract/core';
+import { contract } from './contract';
+
+// List users
+export type ListUsersQuery = InferQuery<typeof contract.users.list>;
+export type ListUsersResponse = InferResponseBody<typeof contract.users.list, 200>;
+
+// Get user
+export type GetUserParams = InferPathParams<typeof contract.users.get>;
+export type User = InferResponseBody<typeof contract.users.get, 200>;
+export type UserNotFound = InferResponseBody<typeof contract.users.get, 404>;
+
+// Create user
+export type CreateUserBody = InferBody<typeof contract.users.create>;
+export type CreateUserResponse = InferResponseBody<typeof contract.users.create, 201>;
+
+// Update user
+export type UpdateUserParams = InferPathParams<typeof contract.users.update>;
+export type UpdateUserBody = InferBody<typeof contract.users.update>;
+export type UpdateUserResponse = InferResponseBody<typeof contract.users.update, 200>;
+
+// Delete user
+export type DeleteUserParams = InferPathParams<typeof contract.users.delete>;
+```
+
+### 4. Implement Server
+
+```ts title="server.ts"
+import { Hono } from 'hono';
+import { api } from './api';
+import type {
+  GetUserParams,
+  User,
+  UserNotFound,
+  CreateUserBody,
+  CreateUserResponse,
+  UpdateUserParams,
+  UpdateUserBody,
+  DeleteUserParams,
+} from './types';
+
+const app = new Hono();
+
+// In-memory database (replace with real database)
+const users = new Map<string, User>([
+  ['1', { id: '1', name: 'Alice', email: 'alice@example.com' }],
+  ['2', { id: '2', name: 'Bob', email: 'bob@example.com' }],
+]);
+
+// List users
+app.get('/users', (c) => {
+  const query = c.req.query();
+  const page = parseInt(query.page || '1');
+  const limit = parseInt(query.limit || '10');
+  
+  const allUsers = Array.from(users.values());
+  const start = (page - 1) * limit;
+  const paginatedUsers = allUsers.slice(start, start + limit);
+  
+  return c.json({
+    users: paginatedUsers,
+    total: allUsers.length,
+  });
+});
+
+// Get user by ID
+app.get('/users/:id', (c) => {
+  const { id } = c.req.param() as GetUserParams;
+  
+  const user = users.get(id);
+  
+  if (!user) {
+    const response: UserNotFound = { message: 'User not found' };
+    return c.json(response, 404);
+  }
+  
+  return c.json(user);
+});
+
+// Create user
+app.post('/users', async (c) => {
+  try {
+    const rawBody = await c.req.json();
+    const body = api.users.create.validateBody(rawBody) as CreateUserBody;
+    
+    const id = String(users.size + 1);
+    const newUser: User = {
+      id,
+      ...body,
+    };
+    
+    users.set(id, newUser);
+    
+    const response: CreateUserResponse = newUser;
+    return c.json(response, 201);
+  } catch (error) {
+    return c.json({ message: error.message }, 400);
+  }
+});
+
+// Update user
+app.put('/users/:id', async (c) => {
+  try {
+    const { id } = c.req.param() as UpdateUserParams;
+    const rawBody = await c.req.json();
+    const body = api.users.update.validateBody(rawBody) as UpdateUserBody;
+    
+    const existingUser = users.get(id);
+    
+    if (!existingUser) {
+      return c.json({ message: 'User not found' }, 404);
+    }
+    
+    const updatedUser: User = {
+      id,
+      ...body,
+    };
+    
+    users.set(id, updatedUser);
+    
+    return c.json(updatedUser);
+  } catch (error) {
+    return c.json({ message: error.message }, 400);
+  }
+});
+
+// Delete user
+app.delete('/users/:id', (c) => {
+  const { id } = c.req.param() as DeleteUserParams;
+  
+  if (!users.has(id)) {
+    return c.json({ message: 'User not found' }, 404);
+  }
+  
+  users.delete(id);
+  
+  return c.body(null, 204);
+});
+
+export default app;
+```
+
+### 5. Start the Server
+
+```ts title="index.ts"
+import { serve } from '@hono/node-server';
+import app from './server';
+
+serve({
+  fetch: app.fetch,
+  port: 3000,
+});
+
+console.log('Server running on http://localhost:3000');
+```
+
+## Validation Middleware
+
+Create reusable validation middleware:
+
+```ts title="middleware.ts"
+import { Context, Next } from 'hono';
+import { api } from './api';
+
+export function validateBody(route: any) {
+  return async (c: Context, next: Next) => {
+    try {
+      const rawBody = await c.req.json();
+      const validatedBody = route.validateBody(rawBody);
+      c.set('validatedBody', validatedBody);
+      await next();
+    } catch (error) {
+      return c.json({ message: error.message }, 400);
+    }
+  };
+}
+
+export function validateParams(route: any) {
+  return async (c: Context, next: Next) => {
+    try {
+      const params = c.req.param();
+      const validatedParams = route.validatePathParams(params);
+      c.set('validatedParams', validatedParams);
+      await next();
+    } catch (error) {
+      return c.json({ message: error.message }, 400);
+    }
+  };
+}
+```
+
+**Usage:**
+
+```ts
+import { validateBody, validateParams } from './middleware';
+
+app.post('/users', validateBody(api.users.create), (c) => {
+  const body = c.get('validatedBody');
+  // body is already validated
+});
+
+app.get('/users/:id', validateParams(api.users.get), (c) => {
+  const params = c.get('validatedParams');
+  // params are already validated
+});
+```
+
+## Error Handling
+
+Centralized error handling:
+
+```ts title="server.ts"
+import { Hono } from 'hono';
+
+const app = new Hono();
+
+// Global error handler
+app.onError((err, c) => {
+  console.error('Error:', err);
+  
+  if (err.name === 'ZodError') {
+    return c.json({ message: 'Validation error', errors: err.errors }, 400);
+  }
+  
+  return c.json({ message: 'Internal server error' }, 500);
+});
+
+// Your routes...
+```
+
+## CORS Support
+
+```ts
+import { cors } from 'hono/cors';
+
+app.use('/*', cors({
+  origin: ['http://localhost:5173'],
+  credentials: true,
+}));
+```
+
+## Authentication
+
+```ts title="auth-middleware.ts"
+import { Context, Next } from 'hono';
+
+export async function requireAuth(c: Context, next: Next) {
+  const authHeader = c.req.header('Authorization');
+  
+  if (!authHeader?.startsWith('Bearer ')) {
+    return c.json({ message: 'Unauthorized' }, 401);
+  }
+  
+  const token = authHeader.substring(7);
+  
+  // Verify token (replace with your auth logic)
+  const user = await verifyToken(token);
+  
+  if (!user) {
+    return c.json({ message: 'Invalid token' }, 401);
+  }
+  
+  c.set('user', user);
+  await next();
+}
+```
+
+**Usage:**
+
+```ts
+app.get('/users/:id', requireAuth, (c) => {
+  const user = c.get('user');
+  // user is authenticated
+});
+```
+
+## Testing
+
+```ts title="server.test.ts"
+import { describe, it, expect } from 'vitest';
+import app from './server';
+
+describe('User API', () => {
+  it('should list users', async () => {
+    const res = await app.request('/users');
+    expect(res.status).toBe(200);
+    
+    const data = await res.json();
+    expect(data.users).toBeInstanceOf(Array);
+  });
+  
+  it('should get user by id', async () => {
+    const res = await app.request('/users/1');
+    expect(res.status).toBe(200);
+    
+    const user = await res.json();
+    expect(user.id).toBe('1');
+  });
+  
+  it('should return 404 for non-existent user', async () => {
+    const res = await app.request('/users/999');
+    expect(res.status).toBe(404);
+  });
+  
+  it('should create user', async () => {
+    const res = await app.request('/users', {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({
+        name: 'Charlie',
+        email: 'charlie@example.com',
+      }),
+    });
+    
+    expect(res.status).toBe(201);
+    
+    const user = await res.json();
+    expect(user.name).toBe('Charlie');
+  });
+});
+```
+
+## Deployment
+
+### Cloudflare Workers
+
+```ts title="wrangler.toml"
+name = "my-api"
+main = "src/index.ts"
+compatibility_date = "2024-01-01"
+
+[build]
+command = "pnpm build"
+```
+
+```ts title="src/index.ts"
+import app from './server';
+
+export default app;
+```
+
+### Node.js
+
+```ts title="index.ts"
+import { serve } from '@hono/node-server';
+import app from './server';
+
+const port = parseInt(process.env.PORT || '3000');
+
+serve({
+  fetch: app.fetch,
+  port,
+});
+
+console.log(`Server running on http://localhost:${port}`);
+```
+
+## Best Practices
+
+1. **Separate concerns**: Keep contract, types, and server logic in separate files
+2. **Validate early**: Use validation middleware to catch errors early
+3. **Type everything**: Use inferred types from your contract
+4. **Handle errors**: Implement global error handling
+5. **Test thoroughly**: Write tests for all routes
+
+## Complete Project Structure
+
+```
+my-api/
+├── src/
+│   ├── contract.ts       # Contract definition
+│   ├── api.ts            # Contract with plugins
+│   ├── types.ts          # Inferred types
+│   ├── server.ts         # Hono server
+│   ├── middleware.ts     # Validation middleware
+│   └── index.ts          # Entry point
+├── package.json
+└── tsconfig.json
+```
+
+## Next Steps
+
+- Add [authentication](/recipes/advanced/auth) to protect routes
+- Implement [error handling](/recipes/advanced/error-handling) patterns
+- Set up [React Query client](/recipes/client/react-query) for the frontend
+- Create a [monorepo](/recipes/full-stack/monorepo) with shared contracts
+
+## See Also
+
+- [Express Integration](/recipes/server/express) - Alternative server framework
+- [Fastify Integration](/recipes/server/fastify) - High-performance alternative
+- [Validate Plugin](/plugins/validate-plugin) - Runtime validation details

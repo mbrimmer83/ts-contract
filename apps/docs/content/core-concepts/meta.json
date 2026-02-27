@@ -1,0 +1,4 @@
+{
+  "title": "Core Concepts",
+  "pages": ["contracts", "routes-and-schemas", "type-inference", "plugin-system"]
+}

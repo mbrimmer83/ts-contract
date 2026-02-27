@@ -1,0 +1,447 @@
+---
+title: Plugin System
+description: Extend your contracts with composable plugins for runtime utilities and enhanced functionality.
+---
+
+## Plugin System Overview
+
+The plugin system in ts-contract allows you to extend your contracts with runtime utilities while maintaining full type safety. Plugins add methods to each route in your contract, enabling features like path building, validation, and custom functionality.
+
+**Philosophy:** Plugins are opt-in and composable. Start with a minimal contract and add only the capabilities you need.
+
+## Basic Plugin Usage
+
+Use `initContract()` to create a builder, compose plugins with `.use()`, and call `.build()` to produce an enhanced contract:
+
+```ts
+import { createContract, initContract } from '@ts-contract/core';
+import { pathPlugin, validatePlugin } from '@ts-contract/plugins';
+import { z } from 'zod';
+
+const contract = createContract({
+  getUser: {
+    method: 'GET',
+    path: '/users/:id',
+    pathParams: z.object({ id: z.string() }),
+    responses: {
+      200: z.object({
+        id: z.string(),
+        name: z.string(),
+        email: z.string().email(),
+      }),
+    },
+  },
+});
+
+// Initialize and add plugins
+const api = initContract(contract)
+  .use(pathPlugin)
+  .use(validatePlugin)
+  .build();
+
+// Now routes have plugin methods
+const url = api.getUser.buildPath({ id: '123' });
+// => "/users/123"
+
+const user = api.getUser.validateResponse(200, {
+  id: '123',
+  name: 'Alice',
+  email: 'alice@example.com',
+});
+// => { id: '123', name: 'Alice', email: 'alice@example.com' }
+```
+
+## The Builder Pattern
+
+### initContract()
+
+Creates a contract builder that accumulates plugins:
+
+```ts
+import { initContract } from '@ts-contract/core';
+
+const builder = initContract(contract);
+// builder has .use() and .build() methods
+```
+
+### .use(plugin)
+
+Adds a plugin to the builder. Plugins are applied in the order they're added:
+
+```ts
+const api = initContract(contract)
+  .use(pathPlugin)      // First plugin
+  .use(validatePlugin)  // Second plugin
+  .build();
+```
+
+### .build()
+
+Produces the final enhanced contract with all plugin methods:
+
+```ts
+const api = initContract(contract)
+  .use(pathPlugin)
+  .use(validatePlugin)
+  .build();
+
+// api now has all methods from both plugins
+```
+
+## How Plugins Extend Routes
+
+Plugins add methods to each route in your contract. The methods are fully type-safe based on the route definition:
+
+```ts
+import { createContract, initContract } from '@ts-contract/core';
+import { pathPlugin, validatePlugin } from '@ts-contract/plugins';
+import { z } from 'zod';
+
+const contract = createContract({
+  getUser: {
+    method: 'GET',
+    path: '/users/:id',
+    pathParams: z.object({ id: z.string() }),
+    query: z.object({ include: z.string().optional() }),
+    responses: {
+      200: z.object({ id: z.string(), name: z.string() }),
+    },
+  },
+});
+
+const api = initContract(contract)
+  .use(pathPlugin)
+  .use(validatePlugin)
+  .build();
+
+// pathPlugin adds buildPath()
+api.getUser.buildPath({ id: '123' });
+api.getUser.buildPath({ id: '123' }, { include: 'profile' });
+
+// validatePlugin adds validation methods
+api.getUser.validatePathParams({ id: '123' });
+api.getUser.validateQuery({ include: 'profile' });
+api.getUser.validateResponse(200, { id: '123', name: 'Alice' });
+```
+
+## Plugin Execution Order
+
+Plugins are applied in the order you call `.use()`:
+
+```ts
+const api = initContract(contract)
+  .use(pluginA)  // Applied first
+  .use(pluginB)  // Applied second
+  .use(pluginC)  // Applied third
+  .build();
+```
+
+If plugins add methods with the same name, later plugins will override earlier ones. This is generally not recommended - each plugin should add unique methods.
+
+## Type Safety with Plugins
+
+Plugins use TypeScript's declaration merging to provide full type safety. The types are automatically inferred based on your route definitions:
+
+```ts
+const contract = createContract({
+  getUser: {
+    method: 'GET',
+    path: '/users/:id',
+    pathParams: z.object({ id: z.string() }),
+    responses: {
+      200: z.object({ id: z.string(), name: z.string() }),
+      404: z.object({ message: z.string() }),
+    },
+  },
+});
+
+const api = initContract(contract)
+  .use(pathPlugin)
+  .use(validatePlugin)
+  .build();
+
+// TypeScript knows the exact parameter types
+api.getUser.buildPath({ id: '123' }); // ✓ Valid
+api.getUser.buildPath({ id: 123 });   // ✗ Error: id must be string
+
+// TypeScript knows the response types by status code
+api.getUser.validateResponse(200, { id: '123', name: 'Alice' }); // ✓ Valid
+api.getUser.validateResponse(200, { id: '123' });                // ✗ Error: missing name
+api.getUser.validateResponse(404, { message: 'Not found' });     // ✓ Valid
+```
+
+## Built-in Plugins
+
+ts-contract provides two built-in plugins:
+
+### pathPlugin
+
+Adds `buildPath()` method for type-safe URL construction:
+
+```ts
+import { pathPlugin } from '@ts-contract/plugins';
+
+const api = initContract(contract)
+  .use(pathPlugin)
+  .build();
+
+// Build paths with parameters
+api.getUser.buildPath({ id: '123' });
+// => "/users/123"
+
+// Build paths with query strings
+api.listUsers.buildPath(undefined, { page: '2', limit: '10' });
+// => "/users?page=2&limit=10"
+```
+
+Learn more: [Path Plugin](/plugins/path-plugin)
+
+### validatePlugin
+
+Adds validation methods for runtime schema validation:
+
+```ts
+import { validatePlugin } from '@ts-contract/plugins';
+
+const api = initContract(contract)
+  .use(validatePlugin)
+  .build();
+
+// Validate request data
+api.createUser.validateBody({ name: 'Alice', email: 'alice@example.com' });
+
+// Validate response data
+api.getUser.validateResponse(200, responseData);
+```
+
+Learn more: [Validate Plugin](/plugins/validate-plugin)
+
+## Using Both Plugins Together
+
+Most applications use both plugins for complete functionality:
+
+```ts
+import { initContract } from '@ts-contract/core';
+import { pathPlugin, validatePlugin } from '@ts-contract/plugins';
+import { contract } from './contract';
+
+export const api = initContract(contract)
+  .use(pathPlugin)
+  .use(validatePlugin)
+  .build();
+
+// Use in client code
+async function getUser(id: string) {
+  const url = api.getUser.buildPath({ id });
+  const response = await fetch(url);
+  const data = await response.json();
+  
+  // Validate the response
+  return api.getUser.validateResponse(200, data);
+}
+
+// Use in server code
+app.get('/users/:id', (req, res) => {
+  const params = api.getUser.validatePathParams(req.params);
+  const user = database.findUser(params.id);
+  res.json(user);
+});
+```
+
+## Nested Contracts with Plugins
+
+Plugins work seamlessly with nested contracts:
+
+```ts
+const contract = createContract({
+  users: {
+    getUser: {
+      method: 'GET',
+      path: '/users/:id',
+      pathParams: z.object({ id: z.string() }),
+      responses: {
+        200: z.object({ id: z.string(), name: z.string() }),
+      },
+    },
+    listUsers: {
+      method: 'GET',
+      path: '/users',
+      responses: {
+        200: z.array(z.object({ id: z.string(), name: z.string() })),
+      },
+    },
+  },
+  posts: {
+    getPost: {
+      method: 'GET',
+      path: '/posts/:id',
+      pathParams: z.object({ id: z.string() }),
+      responses: {
+        200: z.object({ id: z.string(), title: z.string() }),
+      },
+    },
+  },
+});
+
+const api = initContract(contract)
+  .use(pathPlugin)
+  .build();
+
+// Access nested routes
+api.users.getUser.buildPath({ id: '123' });
+api.users.listUsers.buildPath();
+api.posts.getPost.buildPath({ id: '456' });
+```
+
+## When to Use Plugins vs Manual Implementation
+
+### Use Plugins When:
+
+- You want runtime utilities (path building, validation)
+- You need consistent behavior across all routes
+- You want to avoid repetitive code
+- You're building a client library or SDK
+
+### Manual Implementation When:
+
+- You only need type inference (no runtime utilities)
+- You have custom requirements not met by plugins
+- You want minimal bundle size
+- You're integrating with existing utilities
+
+**Example without plugins (type inference only):**
+
+```ts
+import { type InferPathParams, type InferResponseBody } from '@ts-contract/core';
+import { contract } from './contract';
+
+type Params = InferPathParams<typeof contract.getUser>;
+type User = InferResponseBody<typeof contract.getUser, 200>;
+
+// Manually build path
+function buildUserPath(params: Params): string {
+  return `/users/${params.id}`;
+}
+
+// Manually validate (or skip validation)
+async function getUser(id: string): Promise<User> {
+  const response = await fetch(buildUserPath({ id }));
+  return response.json(); // Trust the response shape
+}
+```
+
+## Creating Custom Plugins
+
+You can create your own plugins to add custom functionality. See [Creating Custom Plugins](/plugins/creating-custom-plugins) for a detailed guide.
+
+**Simple example:**
+
+```ts
+import type { ContractPlugin, RouteDef } from '@ts-contract/core';
+
+// Define plugin type registry
+declare module '@ts-contract/core' {
+  interface PluginTypeRegistry<R> {
+    logger: {
+      logRoute: () => void;
+    };
+  }
+}
+
+// Create plugin
+export const loggerPlugin: ContractPlugin<'logger'> = {
+  name: 'logger',
+  route: (route: RouteDef) => ({
+    logRoute: () => {
+      console.log(`${route.method} ${route.path}`);
+    },
+  }),
+};
+
+// Use plugin
+const api = initContract(contract)
+  .use(loggerPlugin)
+  .build();
+
+api.getUser.logRoute();
+// => "GET /users/:id"
+```
+
+## Best Practices
+
+### 1. Initialize Once, Export for Reuse
+
+Create your enhanced contract once and export it:
+
+```ts
+// api.ts
+import { initContract } from '@ts-contract/core';
+import { pathPlugin, validatePlugin } from '@ts-contract/plugins';
+import { contract } from './contract';
+
+export const api = initContract(contract)
+  .use(pathPlugin)
+  .use(validatePlugin)
+  .build();
+```
+
+```ts
+// Other files
+import { api } from './api';
+
+api.getUser.buildPath({ id: '123' });
+```
+
+### 2. Use Plugins Consistently
+
+If you use plugins, use them everywhere for consistency:
+
+```ts
+// Good - consistent
+const api = initContract(contract)
+  .use(pathPlugin)
+  .use(validatePlugin)
+  .build();
+
+// Avoid - mixing approaches
+const apiWithPath = initContract(contract).use(pathPlugin).build();
+const apiWithValidate = initContract(contract).use(validatePlugin).build();
+```
+
+### 3. Type-Only Imports for Type Helpers
+
+Use type-only imports when you only need types:
+
+```ts
+import type { InferResponseBody } from '@ts-contract/core';
+import { api } from './api';
+
+type User = InferResponseBody<typeof api.getUser, 200>;
+```
+
+### 4. Validate at Boundaries
+
+Use validation plugins at system boundaries (API responses, user input):
+
+```ts
+// Client: Validate API responses
+async function fetchUser(id: string) {
+  const response = await fetch(api.getUser.buildPath({ id }));
+  const data = await response.json();
+  return api.getUser.validateResponse(200, data); // Validate!
+}
+
+// Server: Validate request data
+app.post('/users', (req, res) => {
+  const body = api.createUser.validateBody(req.body); // Validate!
+  const user = database.createUser(body);
+  res.json(user);
+});
+```
+
+## Next Steps
+
+- Explore the [Path Plugin](/plugins/path-plugin) for URL building
+- Learn about the [Validate Plugin](/plugins/validate-plugin) for runtime validation
+- See [Creating Custom Plugins](/plugins/creating-custom-plugins) to build your own
+- Review [Type Inference](/core-concepts/type-inference) for type extraction

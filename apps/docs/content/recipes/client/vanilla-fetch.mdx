@@ -1,0 +1,659 @@
+---
+title: Vanilla Fetch Integration
+description: Use ts-contract with the native Fetch API for type-safe HTTP requests.
+---
+
+## Overview
+
+This guide shows you how to use ts-contract with the native Fetch API for type-safe HTTP requests without any additional libraries.
+
+## Installation
+
+```bash
+pnpm add @ts-contract/core @ts-contract/plugins zod
+```
+
+## Complete Example
+
+### 1. Define Your Contract
+
+```ts title="contract.ts"
+import { createContract } from '@ts-contract/core';
+import { z } from 'zod';
+
+export const contract = createContract({
+  users: {
+    list: {
+      method: 'GET',
+      path: '/users',
+      query: z.object({
+        page: z.string().optional(),
+        limit: z.string().optional(),
+      }),
+      responses: {
+        200: z.object({
+          users: z.array(z.object({
+            id: z.string(),
+            name: z.string(),
+            email: z.string(),
+          })),
+          total: z.number(),
+        }),
+      },
+    },
+    get: {
+      method: 'GET',
+      path: '/users/:id',
+      pathParams: z.object({ id: z.string() }),
+      responses: {
+        200: z.object({
+          id: z.string(),
+          name: z.string(),
+          email: z.string(),
+        }),
+        404: z.object({ message: z.string() }),
+      },
+    },
+    create: {
+      method: 'POST',
+      path: '/users',
+      body: z.object({
+        name: z.string().min(1),
+        email: z.string().email(),
+      }),
+      responses: {
+        201: z.object({
+          id: z.string(),
+          name: z.string(),
+          email: z.string(),
+        }),
+        400: z.object({ message: z.string() }),
+      },
+    },
+    update: {
+      method: 'PUT',
+      path: '/users/:id',
+      pathParams: z.object({ id: z.string() }),
+      body: z.object({
+        name: z.string().min(1),
+        email: z.string().email(),
+      }),
+      responses: {
+        200: z.object({
+          id: z.string(),
+          name: z.string(),
+          email: z.string(),
+        }),
+        404: z.object({ message: z.string() }),
+      },
+    },
+    delete: {
+      method: 'DELETE',
+      path: '/users/:id',
+      pathParams: z.object({ id: z.string() }),
+      responses: {
+        204: z.null(),
+        404: z.object({ message: z.string() }),
+      },
+    },
+  },
+});
+```
+
+### 2. Initialize Contract with Plugins
+
+```ts title="api.ts"
+import { initContract } from '@ts-contract/core';
+import { pathPlugin, validatePlugin } from '@ts-contract/plugins';
+import { contract } from './contract';
+
+export const api = initContract(contract)
+  .use(pathPlugin)
+  .use(validatePlugin)
+  .build();
+```
+
+### 3. Extract Types
+
+```ts title="types.ts"
+import type { InferResponseBody, InferBody } from '@ts-contract/core';
+import { contract } from './contract';
+
+export type User = InferResponseBody<typeof contract.users.get, 200>;
+export type UserList = InferResponseBody<typeof contract.users.list, 200>;
+export type CreateUserBody = InferBody<typeof contract.users.create>;
+export type UpdateUserBody = InferBody<typeof contract.users.update>;
+```
+
+### 4. Create API Client
+
+```ts title="lib/api-client.ts"
+import { api } from './api';
+import type { User, UserList, CreateUserBody, UpdateUserBody } from './types';
+
+const API_BASE_URL = process.env.API_URL || 'http://localhost:3000';
+
+// Generic fetch wrapper
+async function apiFetch<T>(
+  url: string,
+  options?: RequestInit
+): Promise<T> {
+  const response = await fetch(`${API_BASE_URL}${url}`, {
+    ...options,
+    headers: {
+      'Content-Type': 'application/json',
+      ...options?.headers,
+    },
+  });
+  
+  if (!response.ok) {
+    const error = await response.json().catch(() => ({ message: 'Request failed' }));
+    throw new Error(error.message || `HTTP ${response.status}`);
+  }
+  
+  // Handle 204 No Content
+  if (response.status === 204) {
+    return null as T;
+  }
+  
+  return response.json();
+}
+
+// Get user by ID
+export async function getUser(id: string): Promise<User> {
+  const url = api.users.get.buildPath({ id });
+  const data = await apiFetch<unknown>(url);
+  return api.users.get.validateResponse(200, data);
+}
+
+// List users
+export async function listUsers(
+  page?: string,
+  limit?: string
+): Promise<UserList> {
+  const url = api.users.list.buildPath(undefined, { page, limit });
+  const data = await apiFetch<unknown>(url);
+  return api.users.list.validateResponse(200, data);
+}
+
+// Create user
+export async function createUser(body: CreateUserBody): Promise<User> {
+  const url = api.users.create.buildPath();
+  const data = await apiFetch<unknown>(url, {
+    method: 'POST',
+    body: JSON.stringify(body),
+  });
+  return api.users.create.validateResponse(201, data);
+}
+
+// Update user
+export async function updateUser(
+  id: string,
+  body: UpdateUserBody
+): Promise<User> {
+  const url = api.users.update.buildPath({ id });
+  const data = await apiFetch<unknown>(url, {
+    method: 'PUT',
+    body: JSON.stringify(body),
+  });
+  return api.users.update.validateResponse(200, data);
+}
+
+// Delete user
+export async function deleteUser(id: string): Promise<void> {
+  const url = api.users.delete.buildPath({ id });
+  await apiFetch<null>(url, {
+    method: 'DELETE',
+  });
+}
+```
+
+### 5. Usage Examples
+
+#### Fetch Single User
+
+```ts
+import { getUser } from './lib/api-client';
+
+async function example() {
+  try {
+    const user = await getUser('123');
+    console.log(user.name); // TypeScript knows this exists
+  } catch (error) {
+    console.error('Failed to fetch user:', error);
+  }
+}
+```
+
+#### Fetch User List
+
+```ts
+import { listUsers } from './lib/api-client';
+
+async function example() {
+  try {
+    const { users, total } = await listUsers('1', '10');
+    console.log(`Found ${total} users`);
+    users.forEach(user => console.log(user.name));
+  } catch (error) {
+    console.error('Failed to fetch users:', error);
+  }
+}
+```
+
+#### Create User
+
+```ts
+import { createUser } from './lib/api-client';
+
+async function example() {
+  try {
+    const newUser = await createUser({
+      name: 'Alice',
+      email: 'alice@example.com',
+    });
+    console.log('Created user:', newUser.id);
+  } catch (error) {
+    console.error('Failed to create user:', error);
+  }
+}
+```
+
+#### Update User
+
+```ts
+import { updateUser } from './lib/api-client';
+
+async function example() {
+  try {
+    const updated = await updateUser('123', {
+      name: 'Alice Smith',
+      email: 'alice.smith@example.com',
+    });
+    console.log('Updated user:', updated.name);
+  } catch (error) {
+    console.error('Failed to update user:', error);
+  }
+}
+```
+
+#### Delete User
+
+```ts
+import { deleteUser } from './lib/api-client';
+
+async function example() {
+  try {
+    await deleteUser('123');
+    console.log('User deleted');
+  } catch (error) {
+    console.error('Failed to delete user:', error);
+  }
+}
+```
+
+## Advanced Patterns
+
+### Request Interceptor
+
+```ts title="lib/api-client.ts"
+type RequestInterceptor = (url: string, options?: RequestInit) => RequestInit | Promise<RequestInit>;
+
+const interceptors: RequestInterceptor[] = [];
+
+export function addRequestInterceptor(interceptor: RequestInterceptor) {
+  interceptors.push(interceptor);
+}
+
+async function apiFetch<T>(url: string, options?: RequestInit): Promise<T> {
+  let finalOptions = options || {};
+  
+  // Apply interceptors
+  for (const interceptor of interceptors) {
+    finalOptions = await interceptor(url, finalOptions);
+  }
+  
+  const response = await fetch(`${API_BASE_URL}${url}`, finalOptions);
+  // ... rest of implementation
+}
+
+// Usage: Add auth token
+addRequestInterceptor((url, options) => ({
+  ...options,
+  headers: {
+    ...options?.headers,
+    'Authorization': `Bearer ${getToken()}`,
+  },
+}));
+```
+
+### Response Interceptor
+
+```ts
+type ResponseInterceptor = (response: Response) => Response | Promise<Response>;
+
+const responseInterceptors: ResponseInterceptor[] = [];
+
+export function addResponseInterceptor(interceptor: ResponseInterceptor) {
+  responseInterceptors.push(interceptor);
+}
+
+async function apiFetch<T>(url: string, options?: RequestInit): Promise<T> {
+  let response = await fetch(`${API_BASE_URL}${url}`, options);
+  
+  // Apply response interceptors
+  for (const interceptor of responseInterceptors) {
+    response = await interceptor(response);
+  }
+  
+  if (!response.ok) {
+    throw new Error(`HTTP ${response.status}`);
+  }
+  
+  return response.json();
+}
+
+// Usage: Handle 401 errors
+addResponseInterceptor(async (response) => {
+  if (response.status === 401) {
+    // Redirect to login
+    window.location.href = '/login';
+  }
+  return response;
+});
+```
+
+### Retry Logic
+
+```ts
+async function apiFetchWithRetry<T>(
+  url: string,
+  options?: RequestInit,
+  retries = 3
+): Promise<T> {
+  for (let i = 0; i < retries; i++) {
+    try {
+      return await apiFetch<T>(url, options);
+    } catch (error) {
+      if (i === retries - 1) throw error;
+      
+      // Wait before retrying (exponential backoff)
+      await new Promise(resolve => setTimeout(resolve, Math.pow(2, i) * 1000));
+    }
+  }
+  
+  throw new Error('Max retries exceeded');
+}
+```
+
+### Timeout Support
+
+```ts
+async function apiFetchWithTimeout<T>(
+  url: string,
+  options?: RequestInit,
+  timeout = 5000
+): Promise<T> {
+  const controller = new AbortController();
+  const timeoutId = setTimeout(() => controller.abort(), timeout);
+  
+  try {
+    const response = await fetch(`${API_BASE_URL}${url}`, {
+      ...options,
+      signal: controller.signal,
+    });
+    
+    clearTimeout(timeoutId);
+    
+    if (!response.ok) {
+      throw new Error(`HTTP ${response.status}`);
+    }
+    
+    return response.json();
+  } catch (error) {
+    clearTimeout(timeoutId);
+    if (error.name === 'AbortError') {
+      throw new Error('Request timeout');
+    }
+    throw error;
+  }
+}
+```
+
+### Caching
+
+```ts
+const cache = new Map<string, { data: any; timestamp: number }>();
+const CACHE_TTL = 5 * 60 * 1000; // 5 minutes
+
+async function apiFetchWithCache<T>(
+  url: string,
+  options?: RequestInit
+): Promise<T> {
+  // Only cache GET requests
+  if (options?.method && options.method !== 'GET') {
+    return apiFetch<T>(url, options);
+  }
+  
+  const cacheKey = url;
+  const cached = cache.get(cacheKey);
+  
+  if (cached && Date.now() - cached.timestamp < CACHE_TTL) {
+    return cached.data;
+  }
+  
+  const data = await apiFetch<T>(url, options);
+  cache.set(cacheKey, { data, timestamp: Date.now() });
+  
+  return data;
+}
+
+export function clearCache() {
+  cache.clear();
+}
+```
+
+### Loading State Management
+
+```ts
+class ApiClient {
+  private loadingStates = new Map<string, boolean>();
+  private listeners = new Set<(states: Map<string, boolean>) => void>();
+  
+  subscribe(listener: (states: Map<string, boolean>) => void) {
+    this.listeners.add(listener);
+    return () => this.listeners.delete(listener);
+  }
+  
+  private notify() {
+    this.listeners.forEach(listener => listener(this.loadingStates));
+  }
+  
+  async fetch<T>(key: string, url: string, options?: RequestInit): Promise<T> {
+    this.loadingStates.set(key, true);
+    this.notify();
+    
+    try {
+      const data = await apiFetch<T>(url, options);
+      return data;
+    } finally {
+      this.loadingStates.set(key, false);
+      this.notify();
+    }
+  }
+}
+
+export const apiClient = new ApiClient();
+
+// Usage in React
+function useApiLoading(key: string) {
+  const [loading, setLoading] = useState(false);
+  
+  useEffect(() => {
+    return apiClient.subscribe((states) => {
+      setLoading(states.get(key) || false);
+    });
+  }, [key]);
+  
+  return loading;
+}
+```
+
+### Error Handling
+
+```ts
+export class ApiError extends Error {
+  constructor(
+    message: string,
+    public status: number,
+    public data?: any
+  ) {
+    super(message);
+    this.name = 'ApiError';
+  }
+}
+
+async function apiFetch<T>(url: string, options?: RequestInit): Promise<T> {
+  const response = await fetch(`${API_BASE_URL}${url}`, options);
+  
+  if (!response.ok) {
+    const data = await response.json().catch(() => null);
+    throw new ApiError(
+      data?.message || `HTTP ${response.status}`,
+      response.status,
+      data
+    );
+  }
+  
+  if (response.status === 204) {
+    return null as T;
+  }
+  
+  return response.json();
+}
+
+// Usage
+try {
+  await getUser('123');
+} catch (error) {
+  if (error instanceof ApiError) {
+    if (error.status === 404) {
+      console.log('User not found');
+    } else if (error.status === 401) {
+      console.log('Unauthorized');
+    }
+  }
+}
+```
+
+## Complete API Client Class
+
+```ts title="lib/api-client.ts"
+import { api } from './api';
+import type { User, UserList, CreateUserBody, UpdateUserBody } from './types';
+
+class ApiClient {
+  private baseUrl: string;
+  
+  constructor(baseUrl: string) {
+    this.baseUrl = baseUrl;
+  }
+  
+  private async fetch<T>(url: string, options?: RequestInit): Promise<T> {
+    const response = await fetch(`${this.baseUrl}${url}`, {
+      ...options,
+      headers: {
+        'Content-Type': 'application/json',
+        ...options?.headers,
+      },
+    });
+    
+    if (!response.ok) {
+      const error = await response.json().catch(() => ({ message: 'Request failed' }));
+      throw new Error(error.message || `HTTP ${response.status}`);
+    }
+    
+    if (response.status === 204) {
+      return null as T;
+    }
+    
+    return response.json();
+  }
+  
+  async getUser(id: string): Promise<User> {
+    const url = api.users.get.buildPath({ id });
+    const data = await this.fetch<unknown>(url);
+    return api.users.get.validateResponse(200, data);
+  }
+  
+  async listUsers(page?: string, limit?: string): Promise<UserList> {
+    const url = api.users.list.buildPath(undefined, { page, limit });
+    const data = await this.fetch<unknown>(url);
+    return api.users.list.validateResponse(200, data);
+  }
+  
+  async createUser(body: CreateUserBody): Promise<User> {
+    const url = api.users.create.buildPath();
+    const data = await this.fetch<unknown>(url, {
+      method: 'POST',
+      body: JSON.stringify(body),
+    });
+    return api.users.create.validateResponse(201, data);
+  }
+  
+  async updateUser(id: string, body: UpdateUserBody): Promise<User> {
+    const url = api.users.update.buildPath({ id });
+    const data = await this.fetch<unknown>(url, {
+      method: 'PUT',
+      body: JSON.stringify(body),
+    });
+    return api.users.update.validateResponse(200, data);
+  }
+  
+  async deleteUser(id: string): Promise<void> {
+    const url = api.users.delete.buildPath({ id });
+    await this.fetch<null>(url, {
+      method: 'DELETE',
+    });
+  }
+}
+
+export const apiClient = new ApiClient(
+  process.env.API_URL || 'http://localhost:3000'
+);
+```
+
+## Best Practices
+
+1. **Validate responses**: Always validate API responses with the validatePlugin
+2. **Handle errors**: Implement proper error handling
+3. **Type everything**: Use inferred types from your contract
+4. **Create abstractions**: Build reusable fetch wrappers
+5. **Add interceptors**: Use interceptors for auth, logging, etc.
+
+## Project Structure
+
+```
+my-app/
+├── lib/
+│   ├── contract.ts
+│   ├── api.ts
+│   ├── api-client.ts
+│   └── types.ts
+├── components/
+│   └── user-list.tsx
+└── package.json
+```
+
+## Next Steps
+
+- Add [authentication](/recipes/advanced/auth) with interceptors
+- Implement [error handling](/recipes/advanced/error-handling) patterns
+- Create a [monorepo](/recipes/full-stack/monorepo) with shared contracts
+- Upgrade to [React Query](/recipes/client/react-query) for better DX
+
+## See Also
+
+- [React Query Integration](/recipes/client/react-query) - Enhanced data fetching
+- [Path Plugin](/plugins/path-plugin) - URL building
+- [Validate Plugin](/plugins/validate-plugin) - Response validation

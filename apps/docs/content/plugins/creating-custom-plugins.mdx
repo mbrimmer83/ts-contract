@@ -1,0 +1,714 @@
+---
+title: Creating Custom Plugins
+description: Build your own plugins to extend ts-contract with custom functionality.
+---
+
+## Plugin Interface
+
+A plugin in ts-contract is an object that implements the `ContractPlugin` interface:
+
+```ts
+interface ContractPlugin<Name extends string = string> {
+  name: Name;
+  route: (route: RouteDef) => Record<string, unknown>;
+}
+```
+
+- **name** - Unique identifier for the plugin
+- **route** - Function that receives a route definition and returns methods to add to that route
+
+## Basic Plugin Example
+
+Here's a simple plugin that adds a `logRoute()` method to each route:
+
+```ts
+import type { ContractPlugin, RouteDef } from '@ts-contract/core';
+
+// Step 1: Declare types using module augmentation
+declare module '@ts-contract/core' {
+  interface PluginTypeRegistry<R> {
+    logger: {
+      logRoute: () => void;
+    };
+  }
+}
+
+// Step 2: Implement the plugin
+export const loggerPlugin: ContractPlugin<'logger'> = {
+  name: 'logger',
+  route: (route: RouteDef) => ({
+    logRoute: () => {
+      console.log(`${route.method} ${route.path}`);
+    },
+  }),
+};
+
+// Step 3: Use the plugin
+import { initContract } from '@ts-contract/core';
+import { contract } from './contract';
+
+const api = initContract(contract)
+  .use(loggerPlugin)
+  .build();
+
+api.getUser.logRoute();
+// => "GET /users/:id"
+```
+
+## Step-by-Step Guide
+
+### Step 1: Type Registry Declaration
+
+Use TypeScript's declaration merging to register your plugin's return types:
+
+```ts
+declare module '@ts-contract/core' {
+  interface PluginTypeRegistry<R> {
+    // Plugin name as the key
+    myPlugin: {
+      // Methods your plugin adds
+      myMethod: () => string;
+      anotherMethod: (arg: string) => number;
+    };
+  }
+}
+```
+
+The generic `<R>` represents the route definition and can be used for type-safe method signatures:
+
+```ts
+import type { RouteDef, InferPathParams } from '@ts-contract/core';
+
+declare module '@ts-contract/core' {
+  interface PluginTypeRegistry<R> {
+    myPlugin: {
+      // Use R to make methods type-safe based on the route
+      getParams: R extends RouteDef ? () => InferPathParams<R> : never;
+    };
+  }
+}
+```
+
+### Step 2: Implement the Plugin
+
+Create the plugin object:
+
+```ts
+import type { ContractPlugin, RouteDef } from '@ts-contract/core';
+
+export const myPlugin: ContractPlugin<'myPlugin'> = {
+  name: 'myPlugin',
+  route: (route: RouteDef) => ({
+    myMethod: () => {
+      // Access route properties
+      return `${route.method} ${route.path}`;
+    },
+    anotherMethod: (arg: string) => {
+      return arg.length;
+    },
+  }),
+};
+```
+
+### Step 3: Use the Plugin
+
+Add it to your contract:
+
+```ts
+const api = initContract(contract)
+  .use(myPlugin)
+  .build();
+
+// Methods are now available
+api.getUser.myMethod();
+api.getUser.anotherMethod('test');
+```
+
+## Real-World Examples
+
+### Example 1: OpenAPI Metadata Plugin
+
+Generate OpenAPI metadata for each route:
+
+```ts
+import type { ContractPlugin, RouteDef } from '@ts-contract/core';
+
+interface OpenAPIOperation {
+  operationId: string;
+  summary?: string;
+  tags: string[];
+  parameters: Array<{
+    name: string;
+    in: 'path' | 'query' | 'header';
+    required: boolean;
+  }>;
+}
+
+declare module '@ts-contract/core' {
+  interface PluginTypeRegistry<R> {
+    openapi: {
+      getOpenAPIOperation: () => OpenAPIOperation;
+    };
+  }
+}
+
+export const openapiPlugin: ContractPlugin<'openapi'> = {
+  name: 'openapi',
+  route: (route: RouteDef) => ({
+    getOpenAPIOperation: (): OpenAPIOperation => {
+      const parameters: OpenAPIOperation['parameters'] = [];
+      
+      // Extract path parameters
+      const pathParams = route.path.match(/:([^/]+)/g) || [];
+      pathParams.forEach(param => {
+        parameters.push({
+          name: param.slice(1),
+          in: 'path',
+          required: true,
+        });
+      });
+      
+      // Extract query parameters
+      if (route.query) {
+        // Note: In real implementation, you'd introspect the schema
+        parameters.push({
+          name: 'query',
+          in: 'query',
+          required: false,
+        });
+      }
+      
+      return {
+        operationId: `${route.method.toLowerCase()}_${route.path.replace(/[/:]/g, '_')}`,
+        summary: route.summary,
+        tags: route.metadata?.tags as string[] || [],
+        parameters,
+      };
+    },
+  }),
+};
+
+// Usage
+const api = initContract(contract)
+  .use(openapiPlugin)
+  .build();
+
+const operation = api.getUser.getOpenAPIOperation();
+// {
+//   operationId: 'get_users_id',
+//   summary: 'Get user by ID',
+//   tags: [],
+//   parameters: [{ name: 'id', in: 'path', required: true }]
+// }
+```
+
+### Example 2: Mock Data Generator Plugin
+
+Generate mock data based on response schemas:
+
+```ts
+import type { ContractPlugin, RouteDef } from '@ts-contract/core';
+
+declare module '@ts-contract/core' {
+  interface PluginTypeRegistry<R> {
+    mock: {
+      generateMockResponse: (status: number) => any;
+    };
+  }
+}
+
+export const mockPlugin: ContractPlugin<'mock'> = {
+  name: 'mock',
+  route: (route: RouteDef) => ({
+    generateMockResponse: (status: number) => {
+      const schema = route.responses[status];
+      
+      if (!schema) {
+        throw new Error(`No response schema for status ${status}`);
+      }
+      
+      // Simple mock generation (in real implementation, use a library like faker)
+      // This is a simplified example
+      return {
+        id: '123',
+        name: 'Mock User',
+        email: 'mock@example.com',
+      };
+    },
+  }),
+};
+
+// Usage
+const api = initContract(contract)
+  .use(mockPlugin)
+  .build();
+
+const mockUser = api.getUser.generateMockResponse(200);
+// { id: '123', name: 'Mock User', email: 'mock@example.com' }
+```
+
+### Example 3: Request Builder Plugin
+
+Build complete fetch requests:
+
+```ts
+import type { ContractPlugin, RouteDef, InferPathParams, InferQuery, InferBody } from '@ts-contract/core';
+
+type RequestOptions<R extends RouteDef> = {
+  params?: InferPathParams<R>;
+  query?: InferQuery<R>;
+  body?: InferBody<R>;
+  headers?: Record<string, string>;
+};
+
+declare module '@ts-contract/core' {
+  interface PluginTypeRegistry<R> {
+    request: {
+      buildRequest: R extends RouteDef
+        ? (options: RequestOptions<R>) => Request
+        : never;
+    };
+  }
+}
+
+export const requestPlugin: ContractPlugin<'request'> = {
+  name: 'request',
+  route: (route: RouteDef) => ({
+    buildRequest: (options: any = {}) => {
+      // Build path
+      let path = route.path;
+      if (options.params) {
+        path = path.replace(/:([^/]+)/g, (_, key) => {
+          return encodeURIComponent(options.params[key]);
+        });
+      }
+      
+      // Add query string
+      if (options.query) {
+        const searchParams = new URLSearchParams();
+        for (const [key, value] of Object.entries(options.query)) {
+          if (value !== undefined && value !== null) {
+            searchParams.append(key, String(value));
+          }
+        }
+        const qs = searchParams.toString();
+        if (qs) path += `?${qs}`;
+      }
+      
+      // Build request
+      const init: RequestInit = {
+        method: route.method,
+        headers: {
+          'Content-Type': 'application/json',
+          ...options.headers,
+        },
+      };
+      
+      if (options.body) {
+        init.body = JSON.stringify(options.body);
+      }
+      
+      return new Request(path, init);
+    },
+  }),
+};
+
+// Usage
+const api = initContract(contract)
+  .use(requestPlugin)
+  .build();
+
+const request = api.createUser.buildRequest({
+  body: { name: 'Alice', email: 'alice@example.com' },
+  headers: { 'Authorization': 'Bearer token' },
+});
+
+const response = await fetch(request);
+```
+
+### Example 4: Cache Key Generator Plugin
+
+Generate cache keys for React Query or SWR:
+
+```ts
+import type { ContractPlugin, RouteDef, InferPathParams, InferQuery } from '@ts-contract/core';
+
+type CacheKeyArgs<R extends RouteDef> = {
+  params?: InferPathParams<R>;
+  query?: InferQuery<R>;
+};
+
+declare module '@ts-contract/core' {
+  interface PluginTypeRegistry<R> {
+    cache: {
+      getCacheKey: R extends RouteDef
+        ? (args?: CacheKeyArgs<R>) => string[]
+        : never;
+    };
+  }
+}
+
+export const cachePlugin: ContractPlugin<'cache'> = {
+  name: 'cache',
+  route: (route: RouteDef) => ({
+    getCacheKey: (args: any = {}) => {
+      const key = [route.method, route.path];
+      
+      if (args.params) {
+        key.push(JSON.stringify(args.params));
+      }
+      
+      if (args.query) {
+        key.push(JSON.stringify(args.query));
+      }
+      
+      return key;
+    },
+  }),
+};
+
+// Usage with React Query
+import { useQuery } from '@tanstack/react-query';
+
+const api = initContract(contract)
+  .use(cachePlugin)
+  .build();
+
+function useUser(id: string) {
+  return useQuery({
+    queryKey: api.getUser.getCacheKey({ params: { id } }),
+    queryFn: async () => {
+      const response = await fetch(`/users/${id}`);
+      return response.json();
+    },
+  });
+}
+```
+
+## Advanced Patterns
+
+### Accessing Route Schemas
+
+Access the route's schemas within your plugin:
+
+```ts
+export const schemaPlugin: ContractPlugin<'schema'> = {
+  name: 'schema',
+  route: (route: RouteDef) => ({
+    getSchemas: () => ({
+      pathParams: route.pathParams,
+      query: route.query,
+      body: route.body,
+      headers: route.headers,
+      responses: route.responses,
+    }),
+  }),
+};
+```
+
+### Type-Safe Plugin Arguments
+
+Make plugin methods type-safe based on the route:
+
+```ts
+import type { InferPathParams } from '@ts-contract/core';
+
+declare module '@ts-contract/core' {
+  interface PluginTypeRegistry<R> {
+    typedPlugin: {
+      doSomething: R extends RouteDef
+        ? (params: InferPathParams<R>) => string
+        : never;
+    };
+  }
+}
+
+export const typedPlugin: ContractPlugin<'typedPlugin'> = {
+  name: 'typedPlugin',
+  route: (route: RouteDef) => ({
+    doSomething: (params: any) => {
+      // params is type-safe based on the route's pathParams
+      return JSON.stringify(params);
+    },
+  }),
+};
+```
+
+### Stateful Plugins
+
+Plugins can maintain state:
+
+```ts
+export const statsPlugin: ContractPlugin<'stats'> = {
+  name: 'stats',
+  route: (route: RouteDef) => {
+    let callCount = 0;
+    
+    return {
+      incrementCalls: () => {
+        callCount++;
+      },
+      getCallCount: () => {
+        return callCount;
+      },
+    };
+  },
+};
+
+// Each route gets its own state
+api.getUser.incrementCalls();
+api.getUser.incrementCalls();
+console.log(api.getUser.getCallCount()); // => 2
+console.log(api.createUser.getCallCount()); // => 0
+```
+
+### Composing with Other Plugins
+
+Plugins can work together:
+
+```ts
+// Use both pathPlugin and your custom plugin
+const api = initContract(contract)
+  .use(pathPlugin)
+  .use(myPlugin)
+  .build();
+
+// Both sets of methods are available
+api.getUser.buildPath({ id: '123' });
+api.getUser.myMethod();
+```
+
+## Testing Plugins
+
+### Unit Testing
+
+Test your plugin in isolation:
+
+```ts
+import { describe, it, expect } from 'vitest';
+import { createContract, initContract } from '@ts-contract/core';
+import { z } from 'zod';
+import { loggerPlugin } from './logger-plugin';
+
+describe('loggerPlugin', () => {
+  it('logs route information', () => {
+    const contract = createContract({
+      getUser: {
+        method: 'GET',
+        path: '/users/:id',
+        pathParams: z.object({ id: z.string() }),
+        responses: {
+          200: z.object({ id: z.string() }),
+        },
+      },
+    });
+    
+    const api = initContract(contract)
+      .use(loggerPlugin)
+      .build();
+    
+    const consoleSpy = vi.spyOn(console, 'log');
+    
+    api.getUser.logRoute();
+    
+    expect(consoleSpy).toHaveBeenCalledWith('GET /users/:id');
+  });
+});
+```
+
+### Integration Testing
+
+Test plugins with real contracts:
+
+```ts
+import { describe, it, expect } from 'vitest';
+
+describe('Plugin Integration', () => {
+  it('works with multiple plugins', () => {
+    const api = initContract(contract)
+      .use(pathPlugin)
+      .use(validatePlugin)
+      .use(myPlugin)
+      .build();
+    
+    // Test that all plugin methods are available
+    expect(api.getUser.buildPath).toBeDefined();
+    expect(api.getUser.validateResponse).toBeDefined();
+    expect(api.getUser.myMethod).toBeDefined();
+  });
+});
+```
+
+## Publishing Plugins
+
+### Package Structure
+
+```
+my-plugin/
+├── src/
+│   └── index.ts
+├── package.json
+├── tsconfig.json
+└── README.md
+```
+
+### package.json
+
+```json
+{
+  "name": "@myorg/ts-contract-plugin-myplugin",
+  "version": "1.0.0",
+  "type": "module",
+  "main": "./dist/index.js",
+  "types": "./dist/index.d.ts",
+  "exports": {
+    ".": {
+      "types": "./dist/index.d.ts",
+      "import": "./dist/index.js"
+    }
+  },
+  "peerDependencies": {
+    "@ts-contract/core": "^1.0.0"
+  },
+  "devDependencies": {
+    "@ts-contract/core": "^1.0.0",
+    "typescript": "^5.0.0"
+  }
+}
+```
+
+### README Template
+
+```markdown
+# @myorg/ts-contract-plugin-myplugin
+
+Description of what your plugin does.
+
+## Installation
+
+\`\`\`bash
+pnpm add @myorg/ts-contract-plugin-myplugin
+\`\`\`
+
+## Usage
+
+\`\`\`ts
+import { initContract } from '@ts-contract/core';
+import { myPlugin } from '@myorg/ts-contract-plugin-myplugin';
+
+const api = initContract(contract)
+  .use(myPlugin)
+  .build();
+\`\`\`
+
+## API
+
+### myMethod()
+
+Description of the method.
+```
+
+## Best Practices
+
+### 1. Single Responsibility
+
+Each plugin should do one thing well:
+
+```ts
+// ✓ Good - focused plugin
+export const pathPlugin: ContractPlugin<'path'> = {
+  name: 'path',
+  route: (route) => ({
+    buildPath: (...args) => { /* ... */ },
+  }),
+};
+
+// ✗ Avoid - too many responsibilities
+export const everythingPlugin: ContractPlugin<'everything'> = {
+  name: 'everything',
+  route: (route) => ({
+    buildPath: (...args) => { /* ... */ },
+    validate: (...args) => { /* ... */ },
+    mock: (...args) => { /* ... */ },
+    log: (...args) => { /* ... */ },
+  }),
+};
+```
+
+### 2. Descriptive Names
+
+Use clear, descriptive names:
+
+```ts
+// ✓ Good
+export const validationPlugin: ContractPlugin<'validation'> = { /* ... */ };
+export const openapiPlugin: ContractPlugin<'openapi'> = { /* ... */ };
+
+// ✗ Avoid
+export const plugin1: ContractPlugin<'p1'> = { /* ... */ };
+export const myPlugin: ContractPlugin<'mp'> = { /* ... */ };
+```
+
+### 3. Type Safety
+
+Leverage TypeScript for type-safe plugin methods:
+
+```ts
+declare module '@ts-contract/core' {
+  interface PluginTypeRegistry<R> {
+    myPlugin: {
+      // Use route types for type-safe methods
+      myMethod: R extends RouteDef
+        ? (params: InferPathParams<R>) => string
+        : never;
+    };
+  }
+}
+```
+
+### 4. Error Handling
+
+Provide clear error messages:
+
+```ts
+export const myPlugin: ContractPlugin<'myPlugin'> = {
+  name: 'myPlugin',
+  route: (route) => ({
+    myMethod: (arg: string) => {
+      if (!arg) {
+        throw new Error(
+          `myMethod requires an argument for route ${route.path}`
+        );
+      }
+      return arg;
+    },
+  }),
+};
+```
+
+### 5. Documentation
+
+Document your plugin's purpose and usage:
+
+```ts
+/**
+ * Plugin that adds logging capabilities to routes.
+ * 
+ * @example
+ * ```ts
+ * const api = initContract(contract)
+ *   .use(loggerPlugin)
+ *   .build();
+ * 
+ * api.getUser.logRoute();
+ * ```
+ */
+export const loggerPlugin: ContractPlugin<'logger'> = { /* ... */ };
+```
+
+## Next Steps
+
+- Review [Plugin System](/core-concepts/plugin-system) for how plugins work internally
+- See [Path Plugin](/plugins/path-plugin) and [Validate Plugin](/plugins/validate-plugin) for reference implementations
+- Explore [Plugins Overview](/plugins/overview) for plugin capabilities
+- Check out community plugins for inspiration

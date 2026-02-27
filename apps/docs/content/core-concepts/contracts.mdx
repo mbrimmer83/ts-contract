@@ -1,0 +1,274 @@
+---
+title: Contracts
+description: Understanding contracts in ts-contract and how to define type-safe API specifications.
+---
+
+## What is a Contract?
+
+A **contract** in ts-contract is a type-safe specification of your HTTP API. It defines the shape of your routes, including paths, methods, parameters, request bodies, and responses. Contracts serve as the single source of truth shared between your server and client code.
+
+Unlike traditional API specifications (like OpenAPI), ts-contract contracts are written in TypeScript and provide first-class type inference throughout your application.
+
+## Creating a Basic Contract
+
+Use `createContract()` to define your API contract:
+
+```ts
+import { createContract } from '@ts-contract/core';
+import { z } from 'zod';
+
+const contract = createContract({
+  getUser: {
+    method: 'GET',
+    path: '/users/:id',
+    pathParams: z.object({ id: z.string() }),
+    responses: {
+      200: z.object({
+        id: z.string(),
+        name: z.string(),
+        email: z.string().email(),
+      }),
+      404: z.object({ message: z.string() }),
+    },
+  },
+  createUser: {
+    method: 'POST',
+    path: '/users',
+    body: z.object({
+      name: z.string(),
+      email: z.string().email(),
+    }),
+    responses: {
+      201: z.object({
+        id: z.string(),
+        name: z.string(),
+        email: z.string().email(),
+      }),
+      400: z.object({ message: z.string() }),
+    },
+  },
+});
+```
+
+## Understanding ContractDef
+
+The `createContract()` function accepts a `ContractDef` - an object where each key is either:
+
+1. **A route definition** (`RouteDef`) - defines a single API endpoint
+2. **A nested contract** (`ContractDef`) - groups related routes together
+
+This flexibility allows you to organize your API in a way that makes sense for your application.
+
+## Route Definitions vs Nested Contracts
+
+### Route Definition
+
+A route definition describes a single HTTP endpoint:
+
+```ts
+const contract = createContract({
+  getUser: {
+    method: 'GET',
+    path: '/users/:id',
+    pathParams: z.object({ id: z.string() }),
+    responses: {
+      200: z.object({ id: z.string(), name: z.string() }),
+    },
+  },
+});
+```
+
+### Nested Contracts
+
+Nest contracts to organize related routes:
+
+```ts
+const contract = createContract({
+  users: {
+    getUser: {
+      method: 'GET',
+      path: '/users/:id',
+      pathParams: z.object({ id: z.string() }),
+      responses: {
+        200: z.object({ id: z.string(), name: z.string() }),
+      },
+    },
+    listUsers: {
+      method: 'GET',
+      path: '/users',
+      query: z.object({ page: z.string().optional() }),
+      responses: {
+        200: z.array(z.object({ id: z.string(), name: z.string() })),
+      },
+    },
+  },
+  posts: {
+    getPost: {
+      method: 'GET',
+      path: '/posts/:id',
+      pathParams: z.object({ id: z.string() }),
+      responses: {
+        200: z.object({ id: z.string(), title: z.string() }),
+      },
+    },
+  },
+});
+```
+
+Access nested routes using dot notation:
+
+```ts
+// After building with plugins
+api.users.getUser.buildPath({ id: '123' });
+api.posts.getPost.buildPath({ id: '456' });
+```
+
+## Composing Contracts
+
+You can compose multiple contracts together for better organization:
+
+```ts
+import { createContract } from '@ts-contract/core';
+import { z } from 'zod';
+
+const userContract = createContract({
+  getUser: {
+    method: 'GET',
+    path: '/users/:id',
+    pathParams: z.object({ id: z.string() }),
+    responses: {
+      200: z.object({ id: z.string(), name: z.string() }),
+    },
+  },
+  createUser: {
+    method: 'POST',
+    path: '/users',
+    body: z.object({ name: z.string(), email: z.string() }),
+    responses: {
+      201: z.object({ id: z.string(), name: z.string() }),
+    },
+  },
+});
+
+const postContract = createContract({
+  getPost: {
+    method: 'GET',
+    path: '/posts/:id',
+    pathParams: z.object({ id: z.string() }),
+    responses: {
+      200: z.object({ id: z.string(), title: z.string() }),
+    },
+  },
+  createPost: {
+    method: 'POST',
+    path: '/posts',
+    body: z.object({ title: z.string(), content: z.string() }),
+    responses: {
+      201: z.object({ id: z.string(), title: z.string() }),
+    },
+  },
+});
+
+const apiContract = createContract({
+  users: userContract,
+  posts: postContract,
+});
+```
+
+This approach allows you to:
+- Keep related routes together in separate files
+- Reuse contracts across different APIs
+- Maintain a clean separation of concerns
+
+## Best Practices for Contract Organization
+
+### 1. Group by Resource
+
+Organize routes by the resource they operate on:
+
+```ts
+const contract = createContract({
+  users: {
+    list: { method: 'GET', path: '/users', /* ... */ },
+    get: { method: 'GET', path: '/users/:id', /* ... */ },
+    create: { method: 'POST', path: '/users', /* ... */ },
+    update: { method: 'PUT', path: '/users/:id', /* ... */ },
+    delete: { method: 'DELETE', path: '/users/:id', /* ... */ },
+  },
+});
+```
+
+### 2. Use Descriptive Route Names
+
+Choose names that clearly describe the action:
+
+```ts
+// Good
+getUser, createUser, updateUserProfile, deleteUserAccount
+
+// Avoid
+user, fetch, doThing
+```
+
+### 3. Keep Contracts Focused
+
+Split large APIs into multiple contract files:
+
+```ts
+// contracts/users.ts
+export const userContract = createContract({ /* ... */ });
+
+// contracts/posts.ts
+export const postContract = createContract({ /* ... */ });
+
+// contracts/index.ts
+export const apiContract = createContract({
+  users: userContract,
+  posts: postContract,
+});
+```
+
+### 4. Share Common Schemas
+
+Extract reusable schemas to avoid duplication:
+
+```ts
+import { z } from 'zod';
+
+const UserSchema = z.object({
+  id: z.string(),
+  name: z.string(),
+  email: z.string().email(),
+});
+
+const ErrorSchema = z.object({
+  message: z.string(),
+});
+
+const contract = createContract({
+  getUser: {
+    method: 'GET',
+    path: '/users/:id',
+    pathParams: z.object({ id: z.string() }),
+    responses: {
+      200: UserSchema,
+      404: ErrorSchema,
+    },
+  },
+  createUser: {
+    method: 'POST',
+    path: '/users',
+    body: UserSchema.omit({ id: true }),
+    responses: {
+      201: UserSchema,
+      400: ErrorSchema,
+    },
+  },
+});
+```
+
+## Next Steps
+
+- Learn about [Routes & Schemas](/core-concepts/routes-and-schemas) to understand route definitions in detail
+- Explore [Type Inference](/core-concepts/type-inference) to see how to extract types from your contracts
+- Understand the [Plugin System](/core-concepts/plugin-system) to add functionality to your contracts
