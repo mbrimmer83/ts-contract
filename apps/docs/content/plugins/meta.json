@@ -1,0 +1,4 @@
+{
+  "title": "Plugins",
+  "pages": ["overview", "path-plugin", "validate-plugin", "creating-custom-plugins"]
+}

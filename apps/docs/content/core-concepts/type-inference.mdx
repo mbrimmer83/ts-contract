@@ -1,0 +1,258 @@
+---
+title: Type Inference
+description: Extract and use TypeScript types from your ts-contract routes for end-to-end type safety.
+---
+
+## How Type Inference Works
+
+ts-contract provides powerful TypeScript type helpers that extract types from your route definitions. This enables end-to-end type safety from your contract to both server and client code without any code generation or build steps.
+
+All type inference happens at compile time using TypeScript's type system - there's no runtime overhead.
+
+## Example Contract
+
+We'll use this contract throughout the examples:
+
+```ts
+import { createContract } from '@ts-contract/core';
+import { z } from 'zod';
+
+const contract = createContract({
+  getUser: {
+    method: 'GET',
+    path: '/users/:id',
+    pathParams: z.object({ id: z.string() }),
+    responses: {
+      200: z.object({ id: z.string(), name: z.string(), email: z.string() }),
+      404: z.object({ message: z.string() }),
+    },
+  },
+  listUsers: {
+    method: 'GET',
+    path: '/users',
+    query: z.object({
+      page: z.string().optional(),
+      limit: z.string().optional(),
+    }),
+    responses: {
+      200: z.object({ users: z.array(z.object({ id: z.string(), name: z.string() })), total: z.number() }),
+    },
+  },
+  createUser: {
+    method: 'POST',
+    path: '/users',
+    body: z.object({ name: z.string(), email: z.string().email() }),
+    headers: { 'authorization': z.string() },
+    responses: {
+      201: z.object({ id: z.string(), name: z.string(), email: z.string() }),
+      400: z.object({ message: z.string() }),
+    },
+  },
+  updateUser: {
+    method: 'PUT',
+    path: '/users/:id',
+    pathParams: z.object({ id: z.string() }),
+    query: z.object({ notify: z.boolean().optional() }),
+    body: z.object({ name: z.string(), email: z.string() }),
+    responses: {
+      200: z.object({ id: z.string(), name: z.string(), email: z.string() }),
+    },
+  },
+});
+```
+
+## Available Type Helpers
+
+ts-contract exports type helpers for both HTTP and WebSocket contracts from `@ts-contract/core`:
+
+**HTTP Type Helpers:**
+```ts
+import type {
+  InferPathParams,
+  InferQuery,
+  InferBody,
+  InferHeaders,
+  InferResponseBody,
+  InferResponses,
+  InferArgs,
+} from '@ts-contract/core';
+```
+
+**WebSocket Type Helpers:**
+```ts
+import type {
+  InferWebSocketPathParams,
+  InferWebSocketQuery,
+  InferWebSocketHeaders,
+  InferClientMessages,
+  InferServerMessages,
+  InferClientMessage,
+  InferServerMessage,
+} from '@ts-contract/core';
+```
+
+## InferPathParams
+
+Extract path parameter types from a route:
+
+```ts
+type Params = InferPathParams<typeof contract.getUser>;
+// => { id: string }
+```
+
+## InferQuery
+
+Extract query parameter types from a route:
+
+```ts
+type Query = InferQuery<typeof contract.listUsers>;
+// => { page?: string; limit?: string }
+```
+
+## InferBody
+
+Extract request body type from a route:
+
+```ts
+type Body = InferBody<typeof contract.createUser>;
+// => { name: string; email: string }
+```
+
+## InferHeaders
+
+Extract request header types from a route:
+
+```ts
+type Headers = InferHeaders<typeof contract.createUser>;
+// => { authorization: string }
+```
+
+## InferResponseBody
+
+Extract a specific response type by status code:
+
+```ts
+type User = InferResponseBody<typeof contract.getUser, 200>;
+// => { id: string; name: string; email: string }
+
+type NotFound = InferResponseBody<typeof contract.getUser, 404>;
+// => { message: string }
+```
+
+## InferResponses
+
+Extract all responses as a discriminated union:
+
+```ts
+type Response = InferResponses<typeof contract.getUser>;
+// => 
+// | { status: 200; body: { id: string; name: string; email: string } }
+// | { status: 404; body: { message: string } }
+```
+
+## InferArgs
+
+Merge all input types (params, query, body, headers) into a single object:
+
+```ts
+type Args = InferArgs<typeof contract.updateUser>;
+// => {
+//   params: { id: string };
+//   query: { notify?: boolean };
+//   body: { name: string; email: string };
+// }
+```
+
+## WebSocket Type Inference
+
+Extract types from WebSocket definitions:
+
+```ts
+import { createContract } from '@ts-contract/core';
+import type {
+  InferWebSocketPathParams,
+  InferClientMessage,
+  InferServerMessage,
+} from '@ts-contract/core';
+import { z } from 'zod';
+
+const contract = createContract({
+  chat: {
+    type: 'websocket',
+    path: '/ws/chat/:roomId',
+    pathParams: z.object({ roomId: z.string() }),
+    clientMessages: {
+      new_msg: z.object({
+        type: z.literal('new_msg'),
+        body: z.string(),
+      }),
+    },
+    serverMessages: {
+      new_msg: z.object({
+        type: z.literal('new_msg'),
+        id: z.string(),
+        body: z.string(),
+      }),
+    },
+  },
+});
+
+// Infer path parameters
+type Params = InferWebSocketPathParams<typeof contract.chat>;
+// => { roomId: string }
+
+// Infer specific message types
+type ClientMsg = InferClientMessage<typeof contract.chat, 'new_msg'>;
+// => { type: 'new_msg', body: string }
+
+type ServerMsg = InferServerMessage<typeof contract.chat, 'new_msg'>;
+// => { type: 'new_msg', id: string, body: string }
+```
+
+Learn more: [WebSocket Contracts](/core-concepts/websocket-contracts)
+
+## Usage Examples
+
+For complete usage examples, see:
+
+- **Server-side**: [Express Integration](/recipes/server/express), [Hono Integration](/recipes/server/hono)
+- **Client-side**: [React Query Integration](/recipes/client/react-query)
+- **WebSocket**: [Phoenix.js Chat](/recipes/websocket/phoenix-chat)
+
+## Tips for Type Inference
+
+### Use `typeof` to Reference Definitions
+
+Always use `typeof` when extracting types:
+
+```ts
+type Params = InferPathParams<typeof contract.getUser>;
+type WsParams = InferWebSocketPathParams<typeof contract.chat>;
+```
+
+### Extract Types at Module Level
+
+Define types at the module level for reuse:
+
+```ts
+export type User = InferResponseBody<typeof contract.getUser, 200>;
+export type ChatMessage = InferClientMessage<typeof contract.chat, 'new_msg'>;
+```
+
+### Combine with Utility Types
+
+TypeScript utility types work with inferred types:
+
+```ts
+type User = InferResponseBody<typeof contract.getUser, 200>;
+type PartialUser = Partial<User>;
+type NewUser = Omit<User, 'id'>;
+```
+
+
+## Next Steps
+
+- Learn about the [Plugin System](/core-concepts/plugin-system) to add runtime utilities
+- See [Contracts](/core-concepts/contracts) for organizing your API
+- Explore [HTTP Routes & Schemas](/core-concepts/routes-and-schemas) for HTTP details
+- Read [WebSocket Contracts](/core-concepts/websocket-contracts) for WebSocket details

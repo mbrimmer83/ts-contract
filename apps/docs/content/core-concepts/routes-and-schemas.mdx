@@ -1,0 +1,340 @@
+---
+title: HTTP Routes & Schemas
+description: Deep dive into HTTP route definitions and schema integration in ts-contract.
+---
+
+## HTTP Route Definition Anatomy
+
+A route definition (`RouteDef`) describes a single HTTP endpoint with all its inputs and outputs.
+
+> **WebSocket Contracts**: For WebSocket connections, see [WebSocket Contracts](/core-concepts/websocket-contracts) which use a different structure with bidirectional message schemas.
+
+Here's a fully annotated example:
+
+```ts
+import { createContract } from '@ts-contract/core';
+import { z } from 'zod';
+
+const contract = createContract({
+  updateUser: {
+    // HTTP method
+    method: 'PUT',
+    
+    // URL path with parameter placeholders
+    path: '/users/:id',
+    
+    // Schema for path parameters
+    pathParams: z.object({ 
+      id: z.string() 
+    }),
+    
+    // Schema for query string parameters
+    query: z.object({ 
+      notify: z.boolean().optional() 
+    }),
+    
+    // Schema for request headers
+    headers: {
+      'x-api-key': z.string(),
+    },
+    
+    // Schema for request body
+    body: z.object({
+      name: z.string(),
+      email: z.string().email(),
+    }),
+    
+    // Schemas for different response status codes
+    responses: {
+      200: z.object({
+        id: z.string(),
+        name: z.string(),
+        email: z.string().email(),
+        updatedAt: z.string(),
+      }),
+      400: z.object({ 
+        message: z.string(),
+        errors: z.array(z.string()).optional(),
+      }),
+      401: z.object({ 
+        message: z.string() 
+      }),
+      404: z.object({ 
+        message: z.string() 
+      }),
+    },
+    
+    // Optional: Human-readable summary
+    summary: 'Update a user profile',
+    
+    // Optional: Custom metadata
+    metadata: {
+      requiresAuth: true,
+      rateLimit: 100,
+    },
+  },
+});
+```
+
+## Route Definition Fields
+
+### method (required)
+
+The HTTP method for this endpoint:
+
+```ts
+type Method = 'GET' | 'POST' | 'PUT' | 'DELETE' | 'PATCH' | 'OPTIONS' | 'HEAD';
+```
+
+### path (required)
+
+The URL path template with optional parameter placeholders using `:paramName` syntax:
+
+```ts
+path: '/users'                        // Static path
+path: '/users/:id'                    // Single parameter
+path: '/users/:userId/posts/:postId'  // Multiple parameters
+```
+
+### pathParams (optional)
+
+Schema for validating path parameters. Parameter names must match the placeholders in `path`:
+
+```ts
+{
+  path: '/users/:userId/posts/:postId',
+  pathParams: z.object({
+    userId: z.string(),
+    postId: z.string(),
+  }),
+}
+```
+
+### query (optional)
+
+Schema for query string parameters:
+
+```ts
+{
+  query: z.object({
+    page: z.string().optional(),
+    limit: z.string().optional(),
+    sort: z.enum(['asc', 'desc']).optional(),
+  }),
+}
+```
+
+### headers (optional)
+
+Schema for request headers as a record of header names to schemas:
+
+```ts
+{
+  headers: {
+    'authorization': z.string(),
+    'x-api-key': z.string(),
+    'content-type': z.literal('application/json'),
+  },
+}
+```
+
+Header names are case-insensitive in HTTP but should be lowercase in your contract.
+
+### body (optional)
+
+Schema for the request body:
+
+```ts
+{
+  method: 'POST',
+  body: z.object({
+    name: z.string(),
+    email: z.string().email(),
+    age: z.number().int().min(0),
+  }),
+}
+```
+
+Typically used with `POST`, `PUT`, and `PATCH` methods.
+
+### responses (required)
+
+Schemas for different HTTP status codes. At least one response must be defined:
+
+```ts
+{
+  responses: {
+    200: z.object({ success: z.boolean() }),
+    400: z.object({ message: z.string() }),
+    500: z.object({ message: z.string() }),
+  },
+}
+```
+
+### summary (optional)
+
+Human-readable description of the endpoint:
+
+```ts
+{
+  summary: 'Retrieve a user by ID',
+}
+```
+
+Useful for documentation generation and developer reference.
+
+### metadata (optional)
+
+Custom metadata as key-value pairs:
+
+```ts
+{
+  metadata: {
+    requiresAuth: true,
+    rateLimit: 100,
+    version: 'v1',
+    deprecated: false,
+  },
+}
+```
+
+Use metadata for custom tooling, documentation, or runtime behavior.
+
+## Standard Schema Protocol
+
+ts-contract uses the [@standard-schema/spec](https://github.com/standard-schema/standard-schema) protocol, which means it works with any compliant validation library.
+
+### Supported Libraries
+
+ts-contract works with Zod, Valibot, Arktype, and any Standard Schema compliant library:
+
+```ts
+import { z } from 'zod';
+
+const contract = createContract({
+  getUser: {
+    method: 'GET',
+    path: '/users/:id',
+    pathParams: z.object({ id: z.string().uuid() }),
+    responses: {
+      200: z.object({
+        id: z.string().uuid(),
+        name: z.string().min(1),
+        email: z.string().email(),
+      }),
+    },
+  },
+});
+```
+
+## Response Status Codes
+
+Define multiple response schemas for different status codes:
+
+```ts
+{
+  responses: {
+    200: z.object({ data: z.any() }),
+    201: z.object({ id: z.string(), createdAt: z.string() }),
+    204: z.null(),
+    400: z.object({ message: z.string() }),
+    404: z.object({ message: z.string() }),
+    500: z.object({ message: z.string() }),
+  },
+}
+```
+
+## Common CRUD Patterns
+
+### List Resources
+
+```ts
+{
+  listUsers: {
+    method: 'GET',
+    path: '/users',
+    query: z.object({
+      page: z.string().optional(),
+      limit: z.string().optional(),
+    }),
+    responses: {
+      200: z.object({
+        data: z.array(z.object({ id: z.string(), name: z.string() })),
+        total: z.number(),
+      }),
+    },
+  },
+}
+```
+
+### Get Single Resource
+
+```ts
+{
+  getUser: {
+    method: 'GET',
+    path: '/users/:id',
+    pathParams: z.object({ id: z.string() }),
+    responses: {
+      200: z.object({ id: z.string(), name: z.string(), email: z.string() }),
+      404: z.object({ message: z.string() }),
+    },
+  },
+}
+```
+
+### Create Resource
+
+```ts
+{
+  createUser: {
+    method: 'POST',
+    path: '/users',
+    body: z.object({ name: z.string(), email: z.string().email() }),
+    responses: {
+      201: z.object({ id: z.string(), name: z.string(), email: z.string() }),
+      400: z.object({ message: z.string() }),
+    },
+  },
+}
+```
+
+### Update Resource
+
+```ts
+{
+  updateUser: {
+    method: 'PUT',
+    path: '/users/:id',
+    pathParams: z.object({ id: z.string() }),
+    body: z.object({ name: z.string(), email: z.string().email() }),
+    responses: {
+      200: z.object({ id: z.string(), name: z.string(), email: z.string() }),
+      404: z.object({ message: z.string() }),
+    },
+  },
+}
+```
+
+### Delete Resource
+
+```ts
+{
+  deleteUser: {
+    method: 'DELETE',
+    path: '/users/:id',
+    pathParams: z.object({ id: z.string() }),
+    responses: {
+      204: z.null(),
+      404: z.object({ message: z.string() }),
+    },
+  },
+}
+```
+
+## Next Steps
+
+- Explore [WebSocket Contracts](/core-concepts/websocket-contracts) for real-time communication
+- Learn about [Type Inference](/core-concepts/type-inference) to extract types from your routes
+- Understand the [Plugin System](/core-concepts/plugin-system) to add functionality
+- See [Contracts](/core-concepts/contracts) for organizing multiple routes

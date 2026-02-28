@@ -1,0 +1,625 @@
+---
+title: Fastify Integration
+description: Integrate ts-contract with Fastify for high-performance type-safe APIs.
+---
+
+## Overview
+
+Fastify is a high-performance web framework focused on speed and low overhead. This guide shows you how to integrate ts-contract with Fastify for maximum performance and type safety.
+
+## Why Fastify + ts-contract?
+
+- **Fast**: One of the fastest Node.js frameworks
+- **Type-safe**: Fastify has excellent TypeScript support
+- **Schema-based**: Fastify uses schemas for validation (works great with ts-contract)
+- **Plugin ecosystem**: Rich ecosystem of plugins
+
+## Installation
+
+```bash
+pnpm add fastify @ts-contract/core @ts-contract/plugins zod
+```
+
+## Complete Example
+
+### 1. Define Your Contract
+
+```ts title="contract.ts"
+import { createContract } from '@ts-contract/core';
+import { z } from 'zod';
+
+export const contract = createContract({
+  users: {
+    list: {
+      method: 'GET',
+      path: '/users',
+      query: z.object({
+        page: z.string().optional(),
+        limit: z.string().optional(),
+      }),
+      responses: {
+        200: z.object({
+          users: z.array(z.object({
+            id: z.string(),
+            name: z.string(),
+            email: z.string(),
+          })),
+          total: z.number(),
+        }),
+      },
+    },
+    get: {
+      method: 'GET',
+      path: '/users/:id',
+      pathParams: z.object({ id: z.string() }),
+      responses: {
+        200: z.object({
+          id: z.string(),
+          name: z.string(),
+          email: z.string(),
+        }),
+        404: z.object({ message: z.string() }),
+      },
+    },
+    create: {
+      method: 'POST',
+      path: '/users',
+      body: z.object({
+        name: z.string().min(1),
+        email: z.string().email(),
+      }),
+      responses: {
+        201: z.object({
+          id: z.string(),
+          name: z.string(),
+          email: z.string(),
+        }),
+        400: z.object({ message: z.string() }),
+      },
+    },
+    update: {
+      method: 'PUT',
+      path: '/users/:id',
+      pathParams: z.object({ id: z.string() }),
+      body: z.object({
+        name: z.string().min(1),
+        email: z.string().email(),
+      }),
+      responses: {
+        200: z.object({
+          id: z.string(),
+          name: z.string(),
+          email: z.string(),
+        }),
+        404: z.object({ message: z.string() }),
+      },
+    },
+    delete: {
+      method: 'DELETE',
+      path: '/users/:id',
+      pathParams: z.object({ id: z.string() }),
+      responses: {
+        204: z.null(),
+        404: z.object({ message: z.string() }),
+      },
+    },
+  },
+});
+```
+
+### 2. Initialize Contract with Plugins
+
+```ts title="api.ts"
+import { initContract } from '@ts-contract/core';
+import { validatePlugin } from '@ts-contract/plugins';
+import { contract } from './contract';
+
+export const api = initContract(contract)
+  .use(validatePlugin)
+  .build();
+```
+
+### 3. Extract Types
+
+```ts title="types.ts"
+import type { InferPathParams, InferQuery, InferBody, InferResponseBody } from '@ts-contract/core';
+import { contract } from './contract';
+
+export type ListUsersQuery = InferQuery<typeof contract.users.list>;
+export type ListUsersResponse = InferResponseBody<typeof contract.users.list, 200>;
+
+export type GetUserParams = InferPathParams<typeof contract.users.get>;
+export type User = InferResponseBody<typeof contract.users.get, 200>;
+export type UserNotFound = InferResponseBody<typeof contract.users.get, 404>;
+
+export type CreateUserBody = InferBody<typeof contract.users.create>;
+export type CreateUserResponse = InferResponseBody<typeof contract.users.create, 201>;
+
+export type UpdateUserParams = InferPathParams<typeof contract.users.update>;
+export type UpdateUserBody = InferBody<typeof contract.users.update>;
+
+export type DeleteUserParams = InferPathParams<typeof contract.users.delete>;
+```
+
+### 4. Implement Server
+
+```ts title="server.ts"
+import Fastify from 'fastify';
+import { api } from './api';
+import type {
+  GetUserParams,
+  User,
+  UserNotFound,
+  CreateUserBody,
+  CreateUserResponse,
+  UpdateUserParams,
+  UpdateUserBody,
+  DeleteUserParams,
+} from './types';
+
+const fastify = Fastify({
+  logger: true,
+});
+
+// In-memory database (replace with real database)
+const users = new Map<string, User>([
+  ['1', { id: '1', name: 'Alice', email: 'alice@example.com' }],
+  ['2', { id: '2', name: 'Bob', email: 'bob@example.com' }],
+]);
+
+// List users
+fastify.get<{
+  Querystring: ListUsersQuery;
+  Reply: ListUsersResponse;
+}>('/users', async (request, reply) => {
+  const { page = '1', limit = '10' } = request.query;
+  
+  const pageNum = parseInt(page);
+  const limitNum = parseInt(limit);
+  
+  const allUsers = Array.from(users.values());
+  const start = (pageNum - 1) * limitNum;
+  const paginatedUsers = allUsers.slice(start, start + limitNum);
+  
+  return {
+    users: paginatedUsers,
+    total: allUsers.length,
+  };
+});
+
+// Get user by ID
+fastify.get<{
+  Params: GetUserParams;
+  Reply: User | UserNotFound;
+}>('/users/:id', async (request, reply) => {
+  const { id } = request.params;
+  
+  const user = users.get(id);
+  
+  if (!user) {
+    reply.code(404);
+    return { message: 'User not found' };
+  }
+  
+  return user;
+});
+
+// Create user
+fastify.post<{
+  Body: CreateUserBody;
+  Reply: CreateUserResponse;
+}>('/users', async (request, reply) => {
+  try {
+    const body = api.users.create.validateBody(request.body);
+    
+    const id = String(users.size + 1);
+    const newUser: User = {
+      id,
+      ...body,
+    };
+    
+    users.set(id, newUser);
+    
+    reply.code(201);
+    return newUser;
+  } catch (error: any) {
+    reply.code(400);
+    return { message: error.message };
+  }
+});
+
+// Update user
+fastify.put<{
+  Params: UpdateUserParams;
+  Body: UpdateUserBody;
+  Reply: User | UserNotFound;
+}>('/users/:id', async (request, reply) => {
+  try {
+    const { id } = request.params;
+    const body = api.users.update.validateBody(request.body);
+    
+    const existingUser = users.get(id);
+    
+    if (!existingUser) {
+      reply.code(404);
+      return { message: 'User not found' };
+    }
+    
+    const updatedUser: User = {
+      id,
+      ...body,
+    };
+    
+    users.set(id, updatedUser);
+    
+    return updatedUser;
+  } catch (error: any) {
+    reply.code(400);
+    return { message: error.message };
+  }
+});
+
+// Delete user
+fastify.delete<{
+  Params: DeleteUserParams;
+}>('/users/:id', async (request, reply) => {
+  const { id } = request.params;
+  
+  if (!users.has(id)) {
+    reply.code(404);
+    return { message: 'User not found' };
+  }
+  
+  users.delete(id);
+  
+  reply.code(204);
+  return;
+});
+
+export default fastify;
+```
+
+### 5. Start the Server
+
+```ts title="index.ts"
+import fastify from './server';
+
+const start = async () => {
+  try {
+    await fastify.listen({
+      port: 3000,
+      host: '0.0.0.0',
+    });
+    
+    console.log('Server running on http://localhost:3000');
+  } catch (err) {
+    fastify.log.error(err);
+    process.exit(1);
+  }
+};
+
+start();
+```
+
+## Validation Plugin
+
+Create a Fastify plugin for validation:
+
+```ts title="plugins/validation.ts"
+import { FastifyPluginAsync } from 'fastify';
+import fp from 'fastify-plugin';
+
+const validationPlugin: FastifyPluginAsync = async (fastify) => {
+  fastify.decorateRequest('validateBody', null);
+  
+  fastify.addHook('preHandler', async (request, reply) => {
+    // Add validation helpers to request
+    request.validateBody = (route: any) => {
+      return route.validateBody(request.body);
+    };
+  });
+};
+
+export default fp(validationPlugin);
+```
+
+**Usage:**
+
+```ts
+import validationPlugin from './plugins/validation';
+
+fastify.register(validationPlugin);
+
+fastify.post('/users', async (request, reply) => {
+  const body = request.validateBody(api.users.create);
+  // ...
+});
+```
+
+## Error Handling
+
+Global error handler:
+
+```ts title="plugins/error-handler.ts"
+import { FastifyPluginAsync } from 'fastify';
+import fp from 'fastify-plugin';
+
+const errorHandlerPlugin: FastifyPluginAsync = async (fastify) => {
+  fastify.setErrorHandler((error, request, reply) => {
+    fastify.log.error(error);
+    
+    if (error.name === 'ZodError') {
+      reply.code(400).send({
+        message: 'Validation error',
+        errors: error.errors,
+      });
+      return;
+    }
+    
+    reply.code(500).send({
+      message: 'Internal server error',
+    });
+  });
+};
+
+export default fp(errorHandlerPlugin);
+```
+
+**Usage:**
+
+```ts
+import errorHandlerPlugin from './plugins/error-handler';
+
+fastify.register(errorHandlerPlugin);
+```
+
+## CORS Support
+
+```ts
+import cors from '@fastify/cors';
+
+fastify.register(cors, {
+  origin: ['http://localhost:5173'],
+  credentials: true,
+});
+```
+
+## Authentication Plugin
+
+```ts title="plugins/auth.ts"
+import { FastifyPluginAsync } from 'fastify';
+import fp from 'fastify-plugin';
+
+declare module 'fastify' {
+  interface FastifyRequest {
+    user?: {
+      id: string;
+      email: string;
+    };
+  }
+}
+
+const authPlugin: FastifyPluginAsync = async (fastify) => {
+  fastify.decorateRequest('user', null);
+  
+  fastify.decorate('authenticate', async (request: any, reply: any) => {
+    const authHeader = request.headers.authorization;
+    
+    if (!authHeader?.startsWith('Bearer ')) {
+      reply.code(401).send({ message: 'Unauthorized' });
+      return;
+    }
+    
+    const token = authHeader.substring(7);
+    
+    try {
+      // Verify token (replace with your auth logic)
+      const user = await verifyToken(token);
+      request.user = user;
+    } catch (error) {
+      reply.code(401).send({ message: 'Invalid token' });
+    }
+  });
+};
+
+async function verifyToken(token: string) {
+  // Implement your token verification logic
+  return { id: '1', email: 'user@example.com' };
+}
+
+export default fp(authPlugin);
+```
+
+**Usage:**
+
+```ts
+import authPlugin from './plugins/auth';
+
+fastify.register(authPlugin);
+
+fastify.get('/users/:id', {
+  preHandler: fastify.authenticate,
+}, async (request, reply) => {
+  const user = request.user; // Authenticated user
+  // ...
+});
+```
+
+## Rate Limiting
+
+```ts
+import rateLimit from '@fastify/rate-limit';
+
+fastify.register(rateLimit, {
+  max: 100,
+  timeWindow: '15 minutes',
+});
+```
+
+## Request Logging
+
+Fastify has built-in logging. Configure it:
+
+```ts
+const fastify = Fastify({
+  logger: {
+    level: 'info',
+    transport: {
+      target: 'pino-pretty',
+      options: {
+        colorize: true,
+      },
+    },
+  },
+});
+```
+
+## Testing
+
+```ts title="server.test.ts"
+import { describe, it, expect, beforeAll, afterAll } from 'vitest';
+import fastify from './server';
+
+describe('User API', () => {
+  beforeAll(async () => {
+    await fastify.ready();
+  });
+  
+  afterAll(async () => {
+    await fastify.close();
+  });
+  
+  it('should list users', async () => {
+    const response = await fastify.inject({
+      method: 'GET',
+      url: '/users',
+    });
+    
+    expect(response.statusCode).toBe(200);
+    const data = JSON.parse(response.payload);
+    expect(data.users).toBeInstanceOf(Array);
+  });
+  
+  it('should get user by id', async () => {
+    const response = await fastify.inject({
+      method: 'GET',
+      url: '/users/1',
+    });
+    
+    expect(response.statusCode).toBe(200);
+    const user = JSON.parse(response.payload);
+    expect(user.id).toBe('1');
+  });
+  
+  it('should return 404 for non-existent user', async () => {
+    const response = await fastify.inject({
+      method: 'GET',
+      url: '/users/999',
+    });
+    
+    expect(response.statusCode).toBe(404);
+  });
+  
+  it('should create user', async () => {
+    const response = await fastify.inject({
+      method: 'POST',
+      url: '/users',
+      payload: {
+        name: 'Charlie',
+        email: 'charlie@example.com',
+      },
+    });
+    
+    expect(response.statusCode).toBe(201);
+    const user = JSON.parse(response.payload);
+    expect(user.name).toBe('Charlie');
+  });
+});
+```
+
+## Complete Server Setup
+
+```ts title="server.ts"
+import Fastify from 'fastify';
+import cors from '@fastify/cors';
+import rateLimit from '@fastify/rate-limit';
+import errorHandlerPlugin from './plugins/error-handler';
+import authPlugin from './plugins/auth';
+import userRoutes from './routes/users';
+
+const fastify = Fastify({
+  logger: true,
+});
+
+// Register plugins
+fastify.register(cors, {
+  origin: ['http://localhost:5173'],
+  credentials: true,
+});
+
+fastify.register(rateLimit, {
+  max: 100,
+  timeWindow: '15 minutes',
+});
+
+fastify.register(errorHandlerPlugin);
+fastify.register(authPlugin);
+
+// Register routes
+fastify.register(userRoutes, { prefix: '/users' });
+
+// Health check
+fastify.get('/health', async () => {
+  return { status: 'ok' };
+});
+
+export default fastify;
+```
+
+## Project Structure
+
+```
+my-api/
+├── src/
+│   ├── contract.ts       # Contract definition
+│   ├── api.ts            # Contract with plugins
+│   ├── types.ts          # Inferred types
+│   ├── server.ts         # Fastify app
+│   ├── index.ts          # Entry point
+│   ├── plugins/
+│   │   ├── auth.ts
+│   │   ├── error-handler.ts
+│   │   └── validation.ts
+│   └── routes/
+│       └── users.ts
+├── package.json
+└── tsconfig.json
+```
+
+## Performance Tips
+
+1. **Use Fastify's schema validation**: For maximum performance, use Fastify's built-in schema validation
+2. **Enable HTTP/2**: Fastify supports HTTP/2 out of the box
+3. **Use pino logger**: Fastify's default logger is extremely fast
+4. **Optimize JSON serialization**: Use `fast-json-stringify` for faster JSON serialization
+
+## Best Practices
+
+1. **Use Fastify's type system**: Leverage Fastify's generic types for routes
+2. **Create plugins**: Organize code into reusable Fastify plugins
+3. **Validate early**: Use preHandler hooks for validation
+4. **Type everything**: Use inferred types from your contract
+5. **Test with inject**: Use Fastify's inject method for testing
+
+## Next Steps
+
+- Add [authentication](/recipes/advanced/auth) to protect routes
+- Implement [error handling](/recipes/advanced/error-handling) patterns
+- Set up [React Query client](/recipes/client/react-query) for the frontend
+- Create a [monorepo](/recipes/full-stack/monorepo) with shared contracts
+
+## See Also
+
+- [Hono Integration](/recipes/server/hono) - Lightweight alternative
+- [Express Integration](/recipes/server/express) - Popular alternative
+- [Validate Plugin](/plugins/validate-plugin) - Runtime validation details

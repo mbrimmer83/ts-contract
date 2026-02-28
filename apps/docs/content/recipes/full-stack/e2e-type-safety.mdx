@@ -1,0 +1,781 @@
+---
+title: End-to-End Type Safety
+description: Achieve complete type safety from database to UI with ts-contract.
+---
+
+## Overview
+
+This guide demonstrates how to achieve complete end-to-end type safety across your entire stack using ts-contract, from database queries to UI components.
+
+## The Type Safety Chain
+
+```
+Database → ORM → API Contract → Client → UI Components
+   ↓         ↓         ↓           ↓          ↓
+  Types → Types → Types → Types → Types
+```
+
+Every layer shares types, ensuring compile-time safety throughout.
+
+## Complete Example
+
+### 1. Database Schema (Prisma)
+
+```prisma title="prisma/schema.prisma"
+model User {
+  id        String   @id @default(cuid())
+  name      String
+  email     String   @unique
+  createdAt DateTime @default(now())
+  updatedAt DateTime @updatedAt
+  posts     Post[]
+}
+
+model Post {
+  id        String   @id @default(cuid())
+  title     String
+  content   String
+  published Boolean  @default(false)
+  authorId  String
+  author    User     @relation(fields: [authorId], references: [id])
+  createdAt DateTime @default(now())
+  updatedAt DateTime @updatedAt
+}
+```
+
+Generate Prisma client:
+
+```bash
+pnpm prisma generate
+```
+
+### 2. Contract Definition
+
+```ts title="contract.ts"
+import { createContract } from '@ts-contract/core';
+import { z } from 'zod';
+
+// Schemas matching database models
+const UserSchema = z.object({
+  id: z.string(),
+  name: z.string(),
+  email: z.string().email(),
+  createdAt: z.string(),
+  updatedAt: z.string(),
+});
+
+const PostSchema = z.object({
+  id: z.string(),
+  title: z.string(),
+  content: z.string(),
+  published: z.boolean(),
+  authorId: z.string(),
+  createdAt: z.string(),
+  updatedAt: z.string(),
+});
+
+const UserWithPostsSchema = UserSchema.extend({
+  posts: z.array(PostSchema),
+});
+
+export const contract = createContract({
+  users: {
+    list: {
+      method: 'GET',
+      path: '/api/users',
+      query: z.object({
+        page: z.string().optional(),
+        limit: z.string().optional(),
+      }),
+      responses: {
+        200: z.object({
+          users: z.array(UserSchema),
+          total: z.number(),
+        }),
+      },
+    },
+    get: {
+      method: 'GET',
+      path: '/api/users/:id',
+      pathParams: z.object({ id: z.string() }),
+      query: z.object({
+        includePosts: z.boolean().optional(),
+      }),
+      responses: {
+        200: z.union([UserSchema, UserWithPostsSchema]),
+        404: z.object({ message: z.string() }),
+      },
+    },
+    create: {
+      method: 'POST',
+      path: '/api/users',
+      body: z.object({
+        name: z.string().min(1),
+        email: z.string().email(),
+      }),
+      responses: {
+        201: UserSchema,
+        400: z.object({ message: z.string() }),
+      },
+    },
+  },
+  posts: {
+    list: {
+      method: 'GET',
+      path: '/api/posts',
+      query: z.object({
+        authorId: z.string().optional(),
+        published: z.boolean().optional(),
+      }),
+      responses: {
+        200: z.array(PostSchema),
+      },
+    },
+    create: {
+      method: 'POST',
+      path: '/api/posts',
+      body: z.object({
+        title: z.string().min(1),
+        content: z.string(),
+        authorId: z.string(),
+      }),
+      responses: {
+        201: PostSchema,
+        400: z.object({ message: z.string() }),
+      },
+    },
+  },
+});
+```
+
+### 3. Database Layer (Repository Pattern)
+
+```ts title="lib/repositories/user-repository.ts"
+import { PrismaClient } from '@prisma/client';
+import type { User } from '@prisma/client';
+
+const prisma = new PrismaClient();
+
+export class UserRepository {
+  async findMany(page: number, limit: number) {
+    const skip = (page - 1) * limit;
+    
+    const [users, total] = await Promise.all([
+      prisma.user.findMany({
+        skip,
+        take: limit,
+        orderBy: { createdAt: 'desc' },
+      }),
+      prisma.user.count(),
+    ]);
+    
+    return { users, total };
+  }
+  
+  async findById(id: string, includePosts = false) {
+    return prisma.user.findUnique({
+      where: { id },
+      include: { posts: includePosts },
+    });
+  }
+  
+  async create(data: { name: string; email: string }) {
+    return prisma.user.create({
+      data,
+    });
+  }
+  
+  async update(id: string, data: Partial<User>) {
+    return prisma.user.update({
+      where: { id },
+      data,
+    });
+  }
+  
+  async delete(id: string) {
+    return prisma.user.delete({
+      where: { id },
+    });
+  }
+}
+
+export const userRepository = new UserRepository();
+```
+
+### 4. API Layer (Express)
+
+```ts title="src/routes/users.ts"
+import { Router } from 'express';
+import { api } from '../lib/api';
+import { userRepository } from '../lib/repositories/user-repository';
+import type { InferResponseBody, InferBody } from '@ts-contract/core';
+import { contract } from '../lib/contract';
+
+const router = Router();
+
+type UserListResponse = InferResponseBody<typeof contract.users.list, 200>;
+type CreateUserBody = InferBody<typeof contract.users.create>;
+
+// GET /api/users
+router.get('/users', async (req, res) => {
+  try {
+    const page = parseInt(req.query.page as string) || 1;
+    const limit = parseInt(req.query.limit as string) || 10;
+    
+    const { users, total } = await userRepository.findMany(page, limit);
+    
+    // Transform Prisma types to API types
+    const response: UserListResponse = {
+      users: users.map(user => ({
+        id: user.id,
+        name: user.name,
+        email: user.email,
+        createdAt: user.createdAt.toISOString(),
+        updatedAt: user.updatedAt.toISOString(),
+      })),
+      total,
+    };
+    
+    res.json(response);
+  } catch (error) {
+    res.status(500).json({ message: 'Failed to fetch users' });
+  }
+});
+
+// POST /api/users
+router.post('/users', async (req, res) => {
+  try {
+    const body = api.users.create.validateBody(req.body) as CreateUserBody;
+    
+    const user = await userRepository.create(body);
+    
+    const response = {
+      id: user.id,
+      name: user.name,
+      email: user.email,
+      createdAt: user.createdAt.toISOString(),
+      updatedAt: user.updatedAt.toISOString(),
+    };
+    
+    res.status(201).json(response);
+  } catch (error: any) {
+    res.status(400).json({ message: error.message });
+  }
+});
+
+// GET /api/users/:id
+router.get('/users/:id', async (req, res) => {
+  try {
+    const includePosts = req.query.includePosts === 'true';
+    
+    const user = await userRepository.findById(req.params.id, includePosts);
+    
+    if (!user) {
+      return res.status(404).json({ message: 'User not found' });
+    }
+    
+    const response = {
+      id: user.id,
+      name: user.name,
+      email: user.email,
+      createdAt: user.createdAt.toISOString(),
+      updatedAt: user.updatedAt.toISOString(),
+      ...(includePosts && {
+        posts: user.posts?.map(post => ({
+          id: post.id,
+          title: post.title,
+          content: post.content,
+          published: post.published,
+          authorId: post.authorId,
+          createdAt: post.createdAt.toISOString(),
+          updatedAt: post.updatedAt.toISOString(),
+        })),
+      }),
+    };
+    
+    res.json(response);
+  } catch (error) {
+    res.status(500).json({ message: 'Failed to fetch user' });
+  }
+});
+
+export default router;
+```
+
+```ts title="src/index.ts"
+import express from 'express';
+import cors from 'cors';
+import userRoutes from './routes/users';
+
+const app = express();
+
+app.use(cors());
+app.use(express.json());
+app.use('/api', userRoutes);
+
+const PORT = process.env.PORT || 3001;
+
+app.listen(PORT, () => {
+  console.log(`API server running on http://localhost:${PORT}`);
+});
+```
+
+### 5. Client Layer
+
+```ts title="lib/api-client.ts"
+import { api } from './api';
+import type { User, CreateUserBody } from './types';
+
+const API_BASE_URL = process.env.NEXT_PUBLIC_API_URL || '';
+
+export async function fetchUser(id: string, includePosts = false) {
+  const url = api.users.get.buildPath({ id });
+  const fullUrl = `${API_BASE_URL}${url}${includePosts ? '?includePosts=true' : ''}`;
+  
+  const response = await fetch(fullUrl);
+  
+  if (!response.ok) {
+    if (response.status === 404) {
+      throw new Error('User not found');
+    }
+    throw new Error('Failed to fetch user');
+  }
+  
+  const data = await response.json();
+  return api.users.get.validateResponse(200, data);
+}
+
+export async function createUser(body: CreateUserBody) {
+  const url = api.users.create.buildPath();
+  const fullUrl = `${API_BASE_URL}${url}`;
+  
+  const response = await fetch(fullUrl, {
+    method: 'POST',
+    headers: { 'Content-Type': 'application/json' },
+    body: JSON.stringify(body),
+  });
+  
+  if (!response.ok) {
+    const error = await response.json();
+    throw new Error(error.message);
+  }
+  
+  const data = await response.json();
+  return api.users.create.validateResponse(201, data);
+}
+```
+
+### 6. React Query Hooks
+
+```ts title="hooks/use-user.ts"
+import { useQuery, useMutation, useQueryClient } from '@tanstack/react-query';
+import { fetchUser, createUser } from '@/lib/api-client';
+import type { CreateUserBody } from '@/lib/types';
+
+export function useUser(id: string, includePosts = false) {
+  return useQuery({
+    queryKey: ['users', id, { includePosts }],
+    queryFn: () => fetchUser(id, includePosts),
+    enabled: !!id,
+  });
+}
+
+export function useCreateUser() {
+  const queryClient = useQueryClient();
+  
+  return useMutation({
+    mutationFn: (body: CreateUserBody) => createUser(body),
+    onSuccess: () => {
+      queryClient.invalidateQueries({ queryKey: ['users'] });
+    },
+  });
+}
+```
+
+### 7. UI Components
+
+```tsx title="components/UserProfile.tsx"
+'use client';
+
+import { useUser } from '@/hooks/use-user';
+
+interface UserProfileProps {
+  userId: string;
+  showPosts?: boolean;
+}
+
+export function UserProfile({ userId, showPosts = false }: UserProfileProps) {
+  const { data: user, isLoading, error } = useUser(userId, showPosts);
+  
+  if (isLoading) {
+    return <div>Loading user...</div>;
+  }
+  
+  if (error) {
+    return <div>Error: {error.message}</div>;
+  }
+  
+  if (!user) {
+    return null;
+  }
+  
+  return (
+    <div>
+      <h2>{user.name}</h2>
+      <p>Email: {user.email}</p>
+      <p>Joined: {new Date(user.createdAt).toLocaleDateString()}</p>
+      
+      {showPosts && 'posts' in user && (
+        <div>
+          <h3>Posts</h3>
+          <ul>
+            {user.posts.map((post) => (
+              <li key={post.id}>
+                <h4>{post.title}</h4>
+                <p>{post.content}</p>
+                <small>
+                  {post.published ? 'Published' : 'Draft'} - 
+                  {new Date(post.createdAt).toLocaleDateString()}
+                </small>
+              </li>
+            ))}
+          </ul>
+        </div>
+      )}
+    </div>
+  );
+}
+```
+
+```tsx title="components/CreateUserForm.tsx"
+'use client';
+
+import { useState } from 'react';
+import { useCreateUser } from '@/hooks/use-user';
+import type { CreateUserBody } from '@/lib/types';
+
+export function CreateUserForm() {
+  const [formData, setFormData] = useState<CreateUserBody>({
+    name: '',
+    email: '',
+  });
+  
+  const createUser = useCreateUser();
+  
+  const handleSubmit = async (e: React.FormEvent) => {
+    e.preventDefault();
+    
+    try {
+      await createUser.mutateAsync(formData);
+      setFormData({ name: '', email: '' });
+    } catch (error) {
+      console.error('Failed to create user:', error);
+    }
+  };
+  
+  return (
+    <form onSubmit={handleSubmit}>
+      <div>
+        <label htmlFor="name">Name:</label>
+        <input
+          id="name"
+          type="text"
+          value={formData.name}
+          onChange={(e) => setFormData({ ...formData, name: e.target.value })}
+          required
+        />
+      </div>
+      
+      <div>
+        <label htmlFor="email">Email:</label>
+        <input
+          id="email"
+          type="email"
+          value={formData.email}
+          onChange={(e) => setFormData({ ...formData, email: e.target.value })}
+          required
+        />
+      </div>
+      
+      <button type="submit" disabled={createUser.isPending}>
+        {createUser.isPending ? 'Creating...' : 'Create User'}
+      </button>
+      
+      {createUser.isError && (
+        <div>Error: {createUser.error.message}</div>
+      )}
+    </form>
+  );
+}
+```
+
+## Type Flow Visualization
+
+```typescript
+// 1. Database (Prisma)
+type PrismaUser = {
+  id: string;
+  name: string;
+  email: string;
+  createdAt: Date;
+  updatedAt: Date;
+};
+
+// 2. Repository (transforms Prisma → API)
+const user: PrismaUser = await prisma.user.findUnique(...);
+
+// 3. API Response (matches contract)
+const apiUser = {
+  id: user.id,
+  name: user.name,
+  email: user.email,
+  createdAt: user.createdAt.toISOString(), // Date → string
+  updatedAt: user.updatedAt.toISOString(),
+};
+
+// 4. Contract validation
+const validated = api.users.get.validateResponse(200, apiUser);
+// Type: { id: string; name: string; email: string; createdAt: string; updatedAt: string }
+
+// 5. React component
+function UserProfile({ userId }: { userId: string }) {
+  const { data: user } = useUser(userId);
+  // user is fully typed from the contract
+  return <div>{user?.name}</div>;
+}
+```
+
+## Benefits
+
+### 1. Compile-Time Safety
+
+TypeScript catches errors before runtime:
+
+```tsx
+// ✓ Valid
+<UserProfile userId="123" />
+
+// ✗ Error: Type 'number' is not assignable to type 'string'
+<UserProfile userId={123} />
+```
+
+### 2. Refactoring Safety
+
+Change the contract:
+
+```ts
+// Before
+email: z.string().email()
+
+// After
+emailAddress: z.string().email() // Renamed
+```
+
+TypeScript errors appear everywhere:
+- API handlers
+- Client code
+- React components
+
+### 3. Auto-completion
+
+Full IntelliSense everywhere:
+
+```tsx
+const { data: user } = useUser('123');
+
+user?.name // ✓ Autocomplete works
+user?.email // ✓ Autocomplete works
+user?.foo // ✗ Error: Property 'foo' does not exist
+```
+
+### 4. Validation at Boundaries
+
+Runtime validation ensures data integrity:
+
+```ts
+// API validates incoming data
+const body = api.users.create.validateBody(req.body);
+
+// Client validates API responses
+const user = api.users.get.validateResponse(200, data);
+```
+
+## Best Practices
+
+### 1. Transform at Boundaries
+
+Convert between types at system boundaries:
+
+```ts
+// Prisma → API
+function toApiUser(prismaUser: PrismaUser) {
+  return {
+    id: prismaUser.id,
+    name: prismaUser.name,
+    email: prismaUser.email,
+    createdAt: prismaUser.createdAt.toISOString(),
+    updatedAt: prismaUser.updatedAt.toISOString(),
+  };
+}
+
+// API → UI (if needed)
+function toDisplayUser(apiUser: User) {
+  return {
+    ...apiUser,
+    displayName: apiUser.name.toUpperCase(),
+    joinedDate: new Date(apiUser.createdAt),
+  };
+}
+```
+
+### 2. Keep Schemas in Sync
+
+Use shared schema definitions:
+
+```ts
+// schemas/user.ts
+export const UserSchema = z.object({
+  id: z.string(),
+  name: z.string(),
+  email: z.string().email(),
+  createdAt: z.string(),
+  updatedAt: z.string(),
+});
+
+// Use in contract
+import { UserSchema } from './schemas/user';
+
+export const contract = createContract({
+  users: {
+    get: {
+      responses: {
+        200: UserSchema,
+      },
+    },
+  },
+});
+```
+
+### 3. Validate Everything
+
+Validate at every boundary:
+
+```ts
+// ✓ Good
+const body = api.users.create.validateBody(req.body);
+const user = await userRepository.create(body);
+const response = toApiUser(user);
+return api.users.create.validateResponse(201, response);
+
+// ✗ Bad - no validation
+const user = await userRepository.create(req.body);
+return user;
+```
+
+### 4. Use Type Guards
+
+Create type guards for discriminated unions:
+
+```ts
+function isUserWithPosts(user: User | UserWithPosts): user is UserWithPosts {
+  return 'posts' in user;
+}
+
+if (isUserWithPosts(user)) {
+  // TypeScript knows user has posts
+  user.posts.forEach(...);
+}
+```
+
+## Testing
+
+### Unit Tests
+
+```ts
+import { describe, it, expect } from 'vitest';
+import { api } from './api';
+
+describe('User API', () => {
+  it('validates user response', () => {
+    const validUser = {
+      id: '1',
+      name: 'Alice',
+      email: 'alice@example.com',
+      createdAt: new Date().toISOString(),
+      updatedAt: new Date().toISOString(),
+    };
+    
+    expect(() => {
+      api.users.get.validateResponse(200, validUser);
+    }).not.toThrow();
+  });
+  
+  it('rejects invalid user response', () => {
+    const invalidUser = {
+      id: '1',
+      name: 'Alice',
+      // Missing email
+    };
+    
+    expect(() => {
+      api.users.get.validateResponse(200, invalidUser);
+    }).toThrow();
+  });
+});
+```
+
+### Integration Tests
+
+```ts
+import { describe, it, expect } from 'vitest';
+import { createUser, fetchUser } from './api-client';
+
+describe('User API Integration', () => {
+  it('creates and fetches user', async () => {
+    const newUser = await createUser({
+      name: 'Test User',
+      email: 'test@example.com',
+    });
+    
+    expect(newUser.id).toBeDefined();
+    expect(newUser.name).toBe('Test User');
+    
+    const fetchedUser = await fetchUser(newUser.id);
+    
+    expect(fetchedUser).toEqual(newUser);
+  });
+});
+```
+
+## Troubleshooting
+
+### Type Mismatches
+
+If types don't match between layers:
+
+1. Check schema definitions
+2. Verify transformations
+3. Ensure validation is applied
+4. Check for Date vs string conversions
+
+### Validation Errors
+
+If validation fails unexpectedly:
+
+1. Log the actual data
+2. Compare with schema
+3. Check for missing fields
+4. Verify data transformations
+
+## Next Steps
+
+- Set up [monorepo](/recipes/full-stack/monorepo) for shared types
+- Add [authentication](/recipes/advanced/auth) with type-safe tokens
+- Implement [testing](/recipes/advanced/testing) strategies
+- Set up [CI/CD](/recipes/advanced/ci-cd) with type checking
+
+## See Also
+
+- [Monorepo Setup](/recipes/full-stack/monorepo) - Share contracts across apps
+- [Type Helpers](/api-reference/core/type-helpers) - Extract types from contracts
+- [Validate Plugin](/plugins/validate-plugin) - Runtime validation

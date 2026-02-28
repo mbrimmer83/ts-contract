@@ -1,5 +1,11 @@
 # @ts-contract/core
 
+## 1.0.0-alpha.1
+
+### Minor Changes
+
+- Add experimental websocket contract
+
 ## 1.0.0-alpha.0
 
 ### Major Changes

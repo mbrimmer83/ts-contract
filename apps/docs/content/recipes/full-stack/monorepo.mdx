@@ -1,0 +1,680 @@
+---
+title: Monorepo Setup
+description: Set up a monorepo with shared ts-contract definitions for full-stack type safety.
+---
+
+## Overview
+
+A monorepo allows you to share your contract definitions between frontend and backend, ensuring end-to-end type safety. This guide shows you how to set up a monorepo with shared contracts.
+
+## Why Monorepo?
+
+- **Single source of truth**: Contract lives in one place
+- **Type safety**: Frontend and backend share the same types
+- **Easier refactoring**: Changes propagate automatically
+- **Simplified development**: Everything in one repository
+
+## Project Structure
+
+```
+my-monorepo/
+├── apps/
+│   ├── api/              # Backend API
+│   │   ├── src/
+│   │   │   ├── index.ts
+│   │   │   └── routes/
+│   │   │       └── users.ts
+│   │   ├── package.json
+│   │   └── tsconfig.json
+│   └── web/              # Frontend app
+│       ├── src/
+│       │   ├── App.tsx
+│       │   ├── lib/
+│       │   │   └── api-client.ts
+│       │   └── hooks/
+│       │       └── use-users.ts
+│       ├── package.json
+│       └── tsconfig.json
+├── packages/
+│   └── contract/         # Shared contract
+│       ├── src/
+│       │   ├── index.ts
+│       │   ├── contract.ts
+│       │   └── types.ts
+│       ├── package.json
+│       └── tsconfig.json
+├── package.json          # Root package.json
+├── pnpm-workspace.yaml
+└── turbo.json
+```
+
+## Setup with pnpm + Turborepo
+
+### 1. Initialize Monorepo
+
+```bash
+mkdir my-monorepo
+cd my-monorepo
+pnpm init
+```
+
+### 2. Create Workspace Configuration
+
+```yaml title="pnpm-workspace.yaml"
+packages:
+  - 'apps/*'
+  - 'packages/*'
+```
+
+### 3. Install Turborepo
+
+```bash
+pnpm add -D turbo
+```
+
+```json title="turbo.json"
+{
+  "$schema": "https://turbo.build/schema.json",
+  "pipeline": {
+    "build": {
+      "dependsOn": ["^build"],
+      "outputs": ["dist/**", ".next/**"]
+    },
+    "dev": {
+      "cache": false,
+      "persistent": true
+    },
+    "lint": {},
+    "type-check": {}
+  }
+}
+```
+
+### 4. Create Shared Contract Package
+
+```bash
+mkdir -p packages/contract/src
+cd packages/contract
+pnpm init
+```
+
+```json title="packages/contract/package.json"
+{
+  "name": "@my-app/contract",
+  "version": "1.0.0",
+  "type": "module",
+  "main": "./dist/index.js",
+  "types": "./dist/index.d.ts",
+  "exports": {
+    ".": {
+      "types": "./dist/index.d.ts",
+      "import": "./dist/index.js"
+    }
+  },
+  "scripts": {
+    "build": "tsc",
+    "dev": "tsc --watch",
+    "type-check": "tsc --noEmit"
+  },
+  "dependencies": {
+    "@ts-contract/core": "^1.0.0",
+    "@ts-contract/plugins": "^1.0.0",
+    "zod": "^3.22.0"
+  },
+  "devDependencies": {
+    "typescript": "^5.3.0"
+  }
+}
+```
+
+```json title="packages/contract/tsconfig.json"
+{
+  "compilerOptions": {
+    "target": "ES2022",
+    "module": "ESNext",
+    "moduleResolution": "bundler",
+    "declaration": true,
+    "declarationMap": true,
+    "outDir": "./dist",
+    "rootDir": "./src",
+    "strict": true,
+    "esModuleInterop": true,
+    "skipLibCheck": true,
+    "forceConsistentCasingInFileNames": true
+  },
+  "include": ["src/**/*"],
+  "exclude": ["node_modules", "dist"]
+}
+```
+
+#### Contract Definition
+
+```ts title="packages/contract/src/contract.ts"
+import { createContract } from '@ts-contract/core';
+import { z } from 'zod';
+
+export const contract = createContract({
+  users: {
+    list: {
+      method: 'GET',
+      path: '/api/users',
+      query: z.object({
+        page: z.string().optional(),
+        limit: z.string().optional(),
+      }),
+      responses: {
+        200: z.object({
+          users: z.array(z.object({
+            id: z.string(),
+            name: z.string(),
+            email: z.string(),
+          })),
+          total: z.number(),
+        }),
+      },
+    },
+    get: {
+      method: 'GET',
+      path: '/api/users/:id',
+      pathParams: z.object({ id: z.string() }),
+      responses: {
+        200: z.object({
+          id: z.string(),
+          name: z.string(),
+          email: z.string(),
+        }),
+        404: z.object({ message: z.string() }),
+      },
+    },
+    create: {
+      method: 'POST',
+      path: '/api/users',
+      body: z.object({
+        name: z.string().min(1),
+        email: z.string().email(),
+      }),
+      responses: {
+        201: z.object({
+          id: z.string(),
+          name: z.string(),
+          email: z.string(),
+        }),
+        400: z.object({ message: z.string() }),
+      },
+    },
+  },
+});
+```
+
+#### API Instance
+
+```ts title="packages/contract/src/api.ts"
+import { initContract } from '@ts-contract/core';
+import { pathPlugin, validatePlugin } from '@ts-contract/plugins';
+import { contract } from './contract';
+
+export const api = initContract(contract)
+  .use(pathPlugin)
+  .use(validatePlugin)
+  .build();
+```
+
+#### Type Exports
+
+```ts title="packages/contract/src/types.ts"
+import type { InferPathParams, InferQuery, InferBody, InferResponseBody } from '@ts-contract/core';
+import { contract } from './contract';
+
+export type User = InferResponseBody<typeof contract.users.get, 200>;
+export type UserList = InferResponseBody<typeof contract.users.list, 200>;
+export type CreateUserBody = InferBody<typeof contract.users.create>;
+export type GetUserParams = InferPathParams<typeof contract.users.get>;
+export type ListUsersQuery = InferQuery<typeof contract.users.list>;
+```
+
+#### Main Export
+
+```ts title="packages/contract/src/index.ts"
+export { contract } from './contract';
+export { api } from './api';
+export * from './types';
+```
+
+### 5. Create Backend API
+
+```bash
+mkdir -p apps/api/src
+cd apps/api
+pnpm init
+```
+
+```json title="apps/api/package.json"
+{
+  "name": "@my-app/api",
+  "version": "1.0.0",
+  "type": "module",
+  "scripts": {
+    "dev": "tsx watch src/index.ts",
+    "build": "tsc",
+    "start": "node dist/index.js",
+    "type-check": "tsc --noEmit"
+  },
+  "dependencies": {
+    "@my-app/contract": "workspace:*",
+    "express": "^4.18.0"
+  },
+  "devDependencies": {
+    "@types/express": "^4.17.0",
+    "tsx": "^4.7.0",
+    "typescript": "^5.3.0"
+  }
+}
+```
+
+```ts title="apps/api/src/index.ts"
+import express from 'express';
+import cors from 'cors';
+import { api, type User, type CreateUserBody } from '@my-app/contract';
+
+const app = express();
+
+app.use(cors());
+app.use(express.json());
+
+// In-memory database
+const users = new Map<string, User>([
+  ['1', { id: '1', name: 'Alice', email: 'alice@example.com' }],
+  ['2', { id: '2', name: 'Bob', email: 'bob@example.com' }],
+]);
+
+// List users
+app.get('/api/users', (req, res) => {
+  const { page = '1', limit = '10' } = req.query;
+  
+  const allUsers = Array.from(users.values());
+  const pageNum = parseInt(page as string);
+  const limitNum = parseInt(limit as string);
+  const start = (pageNum - 1) * limitNum;
+  
+  res.json({
+    users: allUsers.slice(start, start + limitNum),
+    total: allUsers.length,
+  });
+});
+
+// Get user
+app.get('/api/users/:id', (req, res) => {
+  const { id } = req.params;
+  const user = users.get(id);
+  
+  if (!user) {
+    return res.status(404).json({ message: 'User not found' });
+  }
+  
+  res.json(user);
+});
+
+// Create user
+app.post('/api/users', (req, res) => {
+  try {
+    const body = api.users.create.validateBody(req.body) as CreateUserBody;
+    
+    const id = String(users.size + 1);
+    const newUser: User = { id, ...body };
+    
+    users.set(id, newUser);
+    
+    res.status(201).json(newUser);
+  } catch (error: any) {
+    res.status(400).json({ message: error.message });
+  }
+});
+
+const PORT = process.env.PORT || 3001;
+
+app.listen(PORT, () => {
+  console.log(`API server running on http://localhost:${PORT}`);
+});
+```
+
+### 6. Create Frontend App
+
+```bash
+mkdir -p apps/web
+cd apps/web
+pnpm create vite . --template react-ts
+```
+
+```json title="apps/web/package.json"
+{
+  "name": "@my-app/web",
+  "version": "1.0.0",
+  "type": "module",
+  "scripts": {
+    "dev": "vite",
+    "build": "tsc && vite build",
+    "preview": "vite preview",
+    "type-check": "tsc --noEmit"
+  },
+  "dependencies": {
+    "@my-app/contract": "workspace:*",
+    "@tanstack/react-query": "^5.17.0",
+    "react": "^18.2.0",
+    "react-dom": "^18.2.0"
+  },
+  "devDependencies": {
+    "@types/react": "^18.2.0",
+    "@types/react-dom": "^18.2.0",
+    "@vitejs/plugin-react": "^4.2.0",
+    "typescript": "^5.3.0",
+    "vite": "^5.0.0"
+  }
+}
+```
+
+#### API Client
+
+```ts title="apps/web/src/lib/api-client.ts"
+import { api, type User, type UserList, type CreateUserBody } from '@my-app/contract';
+
+const API_BASE_URL = import.meta.env.VITE_API_URL || 'http://localhost:3001';
+
+async function apiFetch<T>(url: string, options?: RequestInit): Promise<T> {
+  const response = await fetch(`${API_BASE_URL}${url}`, {
+    ...options,
+    headers: {
+      'Content-Type': 'application/json',
+      ...options?.headers,
+    },
+  });
+  
+  if (!response.ok) {
+    const error = await response.json().catch(() => ({ message: 'Request failed' }));
+    throw new Error(error.message);
+  }
+  
+  return response.json();
+}
+
+export async function fetchUser(id: string): Promise<User> {
+  const url = api.users.get.buildPath({ id });
+  const data = await apiFetch<unknown>(url);
+  return api.users.get.validateResponse(200, data);
+}
+
+export async function fetchUsers(page?: string, limit?: string): Promise<UserList> {
+  const url = api.users.list.buildPath(undefined, { page, limit });
+  const data = await apiFetch<unknown>(url);
+  return api.users.list.validateResponse(200, data);
+}
+
+export async function createUser(body: CreateUserBody): Promise<User> {
+  const url = api.users.create.buildPath();
+  const data = await apiFetch<unknown>(url, {
+    method: 'POST',
+    body: JSON.stringify(body),
+  });
+  return api.users.create.validateResponse(201, data);
+}
+```
+
+#### React Query Hooks
+
+```ts title="apps/web/src/hooks/use-users.ts"
+import { useQuery, useMutation, useQueryClient } from '@tanstack/react-query';
+import { fetchUser, fetchUsers, createUser } from '../lib/api-client';
+import type { CreateUserBody } from '@my-app/contract';
+
+export function useUser(id: string) {
+  return useQuery({
+    queryKey: ['users', id],
+    queryFn: () => fetchUser(id),
+    enabled: !!id,
+  });
+}
+
+export function useUsers(page?: string, limit?: string) {
+  return useQuery({
+    queryKey: ['users', 'list', page, limit],
+    queryFn: () => fetchUsers(page, limit),
+  });
+}
+
+export function useCreateUser() {
+  const queryClient = useQueryClient();
+  
+  return useMutation({
+    mutationFn: (body: CreateUserBody) => createUser(body),
+    onSuccess: () => {
+      queryClient.invalidateQueries({ queryKey: ['users', 'list'] });
+    },
+  });
+}
+```
+
+#### Component
+
+```tsx title="apps/web/src/components/UserList.tsx"
+import { useUsers } from '../hooks/use-users';
+
+export function UserList() {
+  const { data, isLoading, error } = useUsers();
+  
+  if (isLoading) return <div>Loading...</div>;
+  if (error) return <div>Error: {error.message}</div>;
+  if (!data) return null;
+  
+  return (
+    <div>
+      <h2>Users ({data.total})</h2>
+      <ul>
+        {data.users.map((user) => (
+          <li key={user.id}>
+            {user.name} - {user.email}
+          </li>
+        ))}
+      </ul>
+    </div>
+  );
+}
+```
+
+### 7. Root Package Scripts
+
+```json title="package.json"
+{
+  "name": "my-monorepo",
+  "private": true,
+  "scripts": {
+    "dev": "turbo run dev",
+    "build": "turbo run build",
+    "type-check": "turbo run type-check",
+    "clean": "turbo run clean"
+  },
+  "devDependencies": {
+    "turbo": "^1.11.0"
+  },
+  "packageManager": "pnpm@8.14.0"
+}
+```
+
+## Development Workflow
+
+### Start All Apps
+
+```bash
+pnpm dev
+```
+
+This runs:
+- Contract package in watch mode
+- API server with hot reload
+- Frontend dev server
+
+### Build Everything
+
+```bash
+pnpm build
+```
+
+### Type Check Everything
+
+```bash
+pnpm type-check
+```
+
+## Benefits
+
+### 1. Shared Types
+
+Both frontend and backend use the same types:
+
+```ts
+// Backend
+import type { User } from '@my-app/contract';
+
+const user: User = { id: '1', name: 'Alice', email: 'alice@example.com' };
+```
+
+```ts
+// Frontend
+import type { User } from '@my-app/contract';
+
+const user: User = await fetchUser('1');
+```
+
+### 2. Automatic Updates
+
+When you update the contract, both apps get the changes:
+
+```ts
+// packages/contract/src/contract.ts
+export const contract = createContract({
+  users: {
+    get: {
+      // Add new field
+      responses: {
+        200: z.object({
+          id: z.string(),
+          name: z.string(),
+          email: z.string(),
+          createdAt: z.string(), // ← New field
+        }),
+      },
+    },
+  },
+});
+```
+
+TypeScript will immediately show errors in both apps if they don't handle the new field.
+
+### 3. Refactoring Safety
+
+Rename a field in the contract:
+
+```ts
+// Before
+body: z.object({
+  name: z.string(),
+  email: z.string(),
+}),
+
+// After
+body: z.object({
+  fullName: z.string(), // ← Renamed
+  email: z.string(),
+}),
+```
+
+TypeScript errors will appear everywhere the old field name is used, making refactoring safe.
+
+## Alternative Setups
+
+### With Yarn Workspaces
+
+```json title="package.json"
+{
+  "private": true,
+  "workspaces": [
+    "apps/*",
+    "packages/*"
+  ]
+}
+```
+
+### With npm Workspaces
+
+```json title="package.json"
+{
+  "workspaces": [
+    "apps/*",
+    "packages/*"
+  ]
+}
+```
+
+### With Nx
+
+```bash
+npx create-nx-workspace@latest my-monorepo
+```
+
+## Best Practices
+
+1. **Version contract carefully**: Breaking changes affect all apps
+2. **Use semantic versioning**: For the contract package
+3. **Keep contract minimal**: Only include what's needed
+4. **Document breaking changes**: In the contract package
+5. **Use Turborepo caching**: For faster builds
+
+## Deployment
+
+### Deploy API
+
+```bash
+cd apps/api
+pnpm build
+node dist/index.js
+```
+
+### Deploy Frontend
+
+```bash
+cd apps/web
+pnpm build
+# Deploy dist/ folder to your hosting provider
+```
+
+## Troubleshooting
+
+### Contract changes not reflecting
+
+```bash
+# Rebuild contract package
+cd packages/contract
+pnpm build
+
+# Or use watch mode
+pnpm dev
+```
+
+### TypeScript errors in apps
+
+```bash
+# Clean and rebuild everything
+pnpm clean
+pnpm build
+```
+
+## Next Steps
+
+- Add [authentication](/recipes/advanced/auth) to the monorepo
+- Implement [CI/CD](/recipes/advanced/ci-cd) for the monorepo
+- Set up [testing](/recipes/advanced/testing) across packages
+- Add more shared packages (utils, components, etc.)
+
+## See Also
+
+- [E2E Type Safety](/recipes/full-stack/e2e-type-safety) - Deep dive into type safety
+- [Hono Integration](/recipes/server/hono) - Backend framework
+- [React Query Integration](/recipes/client/react-query) - Frontend data fetching

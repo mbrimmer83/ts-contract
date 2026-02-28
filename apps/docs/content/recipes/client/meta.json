@@ -1,0 +1,4 @@
+{
+  "title": "Client Integrations",
+  "pages": ["react-query", "vanilla-fetch"]
+}

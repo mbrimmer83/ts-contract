@@ -1,0 +1,675 @@
+---
+title: FAQ
+description: Frequently asked questions about ts-contract.
+---
+
+## General Questions
+
+### What is ts-contract?
+
+ts-contract is a schema-first TypeScript library for defining type-safe HTTP and WebSocket API contracts. It provides excellent TypeScript inference without code generation, allowing you to share types between frontend and backend.
+
+### Why use ts-contract instead of tRPC or similar tools?
+
+ts-contract is **minimal by design** with zero framework integrations. Unlike tRPC, which requires specific server and client implementations, ts-contract is just a contract definition that you integrate however you want. This makes it:
+
+- **Framework agnostic**: Works with any server (Express, Fastify, Hono, etc.)
+- **Client agnostic**: Works with any client (fetch, axios, React Query, etc.)
+- **Portable**: Easy to migrate between frameworks
+- **Lightweight**: Minimal bundle size
+
+### Does ts-contract work with JavaScript?
+
+ts-contract is designed for TypeScript. While it can technically work with JavaScript, you'll lose all the type safety benefits. We strongly recommend using TypeScript.
+
+### What schema libraries are supported?
+
+ts-contract supports any library that implements the [@standard-schema/spec](https://github.com/standard-schema/standard-schema) protocol:
+
+- **Zod** - Most popular, great DX
+- **Valibot** - Smaller bundle size, faster
+- **Arktype** - Fastest, unique syntax
+- Any custom Standard Schema implementation
+
+### Is ts-contract production-ready?
+
+Yes! ts-contract is stable and used in production applications. The API is stable and follows semantic versioning.
+
+## Setup & Installation
+
+### How do I install ts-contract?
+
+```bash
+pnpm add @ts-contract/core @ts-contract/plugins zod
+```
+
+You need:
+- `@ts-contract/core` - Core contract definitions and types
+- `@ts-contract/plugins` - Optional plugins (pathPlugin, validatePlugin)
+- A schema library (Zod, Valibot, or Arktype)
+
+### Do I need both core and plugins packages?
+
+- **`@ts-contract/core`** is required - it contains `createContract()`, `initContract()`, and type helpers
+- **`@ts-contract/plugins`** is optional - it provides `pathPlugin` and `validatePlugin`
+
+If you only need type inference without runtime utilities, you can skip the plugins package.
+
+### Can I use ts-contract in a monorepo?
+
+Yes! This is the recommended approach. Create a shared contract package that both your frontend and backend depend on.
+
+1. Create a `packages/contract` directory
+2. Define your contract in the package
+3. Add the contract package as a dependency to your apps
+4. Import and use the contract in both frontend and backend
+
+## Contract Definition
+
+### How do I define a contract?
+
+Use `createContract()` with your route definitions:
+
+```ts
+import { createContract } from '@ts-contract/core';
+import { z } from 'zod';
+
+const contract = createContract({
+  getUser: {
+    method: 'GET',
+    path: '/users/:id',
+    pathParams: z.object({ id: z.string() }),
+    responses: {
+      200: z.object({ id: z.string(), name: z.string() }),
+    },
+  },
+});
+```
+
+### Can I nest contracts?
+
+Yes! You can organize routes into nested structures:
+
+```ts
+const contract = createContract({
+  users: {
+    list: { method: 'GET', path: '/users', /* ... */ },
+    get: { method: 'GET', path: '/users/:id', /* ... */ },
+  },
+  posts: {
+    list: { method: 'GET', path: '/posts', /* ... */ },
+    get: { method: 'GET', path: '/posts/:id', /* ... */ },
+  },
+});
+```
+
+### How do I handle multiple response types?
+
+Define multiple status codes in the `responses` object:
+
+```ts
+const contract = createContract({
+  getUser: {
+    method: 'GET',
+    path: '/users/:id',
+    pathParams: z.object({ id: z.string() }),
+    responses: {
+      200: z.object({ id: z.string(), name: z.string() }),
+      404: z.object({ message: z.string() }),
+      500: z.object({ message: z.string() }),
+    },
+  },
+});
+```
+
+### Can I use the same schema for multiple routes?
+
+Yes! Extract schemas and reuse them:
+
+```ts
+const UserSchema = z.object({
+  id: z.string(),
+  name: z.string(),
+  email: z.string().email(),
+});
+
+const contract = createContract({
+  getUser: {
+    method: 'GET',
+    path: '/users/:id',
+    responses: { 200: UserSchema },
+  },
+  createUser: {
+    method: 'POST',
+    path: '/users',
+    body: UserSchema.omit({ id: true }),
+    responses: { 201: UserSchema },
+  },
+});
+```
+
+### How do I version my API?
+
+Include the version in the path:
+
+```ts
+const contract = createContract({
+  v1: {
+    users: {
+      get: {
+        method: 'GET',
+        path: '/api/v1/users/:id',
+        // ...
+      },
+    },
+  },
+  v2: {
+    users: {
+      get: {
+        method: 'GET',
+        path: '/api/v2/users/:id',
+        // Different schema
+      },
+    },
+  },
+});
+```
+
+## Type Inference
+
+### How do I extract types from my contract?
+
+Use the type helper utilities:
+
+```ts
+import type { InferResponseBody, InferBody, InferPathParams } from '@ts-contract/core';
+
+type User = InferResponseBody<typeof contract.getUser, 200>;
+type CreateUserBody = InferBody<typeof contract.createUser>;
+type GetUserParams = InferPathParams<typeof contract.getUser>;
+```
+
+### Why do I need to use `typeof`?
+
+TypeScript needs `typeof` to get the type of a value:
+
+```ts
+// ✓ Correct
+type User = InferResponseBody<typeof contract.getUser, 200>;
+
+// ✗ Wrong - contract.getUser is a value, not a type
+type User = InferResponseBody<contract.getUser, 200>;
+```
+
+### Can I use inferred types in React components?
+
+Yes! This is one of the main benefits:
+
+```tsx
+import type { InferResponseBody } from '@ts-contract/core';
+import { contract } from './contract';
+
+type User = InferResponseBody<typeof contract.getUser, 200>;
+
+function UserProfile({ user }: { user: User }) {
+  return <div>{user.name}</div>;
+}
+```
+
+### How do I infer all possible responses?
+
+Use `InferResponses` for a discriminated union:
+
+```ts
+import type { InferResponses } from '@ts-contract/core';
+
+type Response = InferResponses<typeof contract.getUser>;
+// => { status: 200; body: User } | { status: 404; body: { message: string } }
+```
+
+## Plugins
+
+### What are plugins?
+
+Plugins add runtime utilities to your contracts. The built-in plugins are:
+
+**HTTP Plugins:**
+- **pathPlugin** - Adds `buildPath()` for URL construction
+- **validatePlugin** - Adds validation methods
+
+**WebSocket Plugins:**
+- **websocketPathPlugin** - Adds `buildPath()` for WebSocket URLs
+- **websocketValidatePlugin** - Adds message validation methods
+
+### Do I need to use plugins?
+
+No! Plugins are optional. If you only need type inference, you can skip plugins:
+
+```ts
+// Without plugins - type inference only
+import type { InferResponseBody } from '@ts-contract/core';
+type User = InferResponseBody<typeof contract.getUser, 200>;
+
+// With plugins - runtime utilities
+import { initContract } from '@ts-contract/core';
+import { pathPlugin } from '@ts-contract/plugins';
+
+const api = initContract(contract).use(pathPlugin).build();
+const url = api.getUser.buildPath({ id: '123' });
+```
+
+### How do I use plugins?
+
+```ts
+const api = initContract(contract)
+  .use(pathPlugin)
+  .use(validatePlugin)
+  .build();
+```
+
+See [Plugin System](/core-concepts/plugin-system) for details.
+
+### Can I create custom plugins?
+
+Yes! See the [Creating Custom Plugins](/plugins/creating-custom-plugins) guide for details.
+
+### Should I use plugins on the server?
+
+Servers typically only need `validatePlugin` for request validation. Clients use both `pathPlugin` and `validatePlugin`.
+
+## WebSocket Questions
+
+### How do I define a WebSocket contract?
+
+Use `type: 'websocket'` and define client/server message schemas:
+
+```ts
+const contract = createContract({
+  chat: {
+    type: 'websocket',
+    path: '/ws/chat/:roomId',
+    pathParams: z.object({ roomId: z.string() }),
+    clientMessages: {
+      new_msg: z.object({
+        type: z.literal('new_msg'),
+        body: z.string(),
+      }),
+    },
+    serverMessages: {
+      new_msg: z.object({
+        type: z.literal('new_msg'),
+        id: z.string(),
+        body: z.string(),
+      }),
+    },
+  },
+});
+```
+
+### Do WebSocket messages need type discriminators?
+
+Yes! Each message schema should include a `type` field matching the event name:
+
+```ts
+clientMessages: {
+  // ✓ Good - type matches event name
+  new_msg: z.object({
+    type: z.literal('new_msg'),
+    body: z.string(),
+  }),
+}
+```
+
+### How do I use WebSocket plugins?
+
+Use `.useWebSocket()` instead of `.use()`:
+
+```ts
+import { websocketPathPlugin, websocketValidatePlugin } from '@ts-contract/plugins';
+
+const api = initContract(contract)
+  .useWebSocket(websocketPathPlugin)
+  .useWebSocket(websocketValidatePlugin)
+  .build();
+
+api.chat.buildPath({ roomId: '123' });
+api.chat.validateClientMessage('new_msg', data);
+```
+
+### Can I mix HTTP and WebSocket in one contract?
+
+Yes! You can have both HTTP routes and WebSocket definitions:
+
+```ts
+const contract = createContract({
+  http: {
+    getUser: { method: 'GET', path: '/users/:id', /* ... */ },
+  },
+  ws: {
+    chat: { type: 'websocket', path: '/ws/chat', /* ... */ },
+  },
+});
+```
+
+### What WebSocket frameworks are supported?
+
+ts-contract is framework-agnostic. It works with:
+- Native WebSocket API
+- Phoenix.js (Elixir)
+- Socket.io
+- Any WebSocket library
+
+See the [Phoenix.js Chat Recipe](/recipes/websocket/phoenix-chat) for an example.
+
+## Validation
+
+### When should I validate?
+
+Always validate at system boundaries:
+
+- **Server**: Validate incoming requests (body, params, query)
+- **Client**: Validate API responses
+- **External APIs**: Validate responses from third-party APIs
+
+### How do I validate request data?
+
+Use the `validatePlugin`:
+
+```ts
+const api = initContract(contract)
+  .use(validatePlugin)
+  .build();
+
+app.post('/users', (req, res) => {
+  try {
+    const body = api.createUser.validateBody(req.body);
+    // body is validated and typed
+  } catch (error) {
+    res.status(400).json({ message: error.message });
+  }
+});
+```
+
+### How do I validate API responses?
+
+```ts
+async function fetchUser(id: string) {
+  const response = await fetch(`/api/users/${id}`);
+  const data = await response.json();
+  
+  // Validate and type the response
+  return api.getUser.validateResponse(200, data);
+}
+```
+
+### What happens if validation fails?
+
+The validation method throws an error with details about what failed:
+
+```ts
+try {
+  api.createUser.validateBody(invalidData);
+} catch (error) {
+  console.error(error.message);
+  // => "Validation failed for body of /users: ..."
+}
+```
+
+### Can I skip validation in production?
+
+Yes, for performance:
+
+```ts
+const shouldValidate = process.env.NODE_ENV !== 'production';
+
+const data = shouldValidate
+  ? api.getUser.validateResponse(200, rawData)
+  : rawData;
+```
+
+However, we recommend validating at least at system boundaries even in production.
+
+## Integration
+
+### How do I use ts-contract with Express?
+
+See the [Express Integration](/recipes/server/express) guide for a complete example.
+
+### How do I use ts-contract with React Query?
+
+See the [React Query Integration](/recipes/client/react-query) guide for a complete example.
+
+### Can I use ts-contract with REST clients like axios?
+
+Yes! ts-contract works with any HTTP client:
+
+```ts
+import axios from 'axios';
+
+async function fetchUser(id: string) {
+  const url = api.getUser.buildPath({ id });
+  const { data } = await axios.get(url);
+  return api.getUser.validateResponse(200, data);
+}
+```
+
+### Does ts-contract support WebSockets?
+
+The contract definition supports WebSocket routes, but the built-in plugins are focused on HTTP. You can create custom plugins for WebSocket-specific functionality.
+
+### Can I use ts-contract with GraphQL?
+
+ts-contract is designed for REST APIs. For GraphQL, consider using GraphQL's built-in type system or tools like GraphQL Code Generator.
+
+## Performance
+
+### What's the bundle size impact?
+
+- **@ts-contract/core**: ~2KB minified + gzipped
+- **pathPlugin**: ~500 bytes
+- **validatePlugin**: ~800 bytes (plus your schema library)
+
+The core library is very lightweight. Most of the bundle size comes from your schema library (Zod, Valibot, etc.).
+
+### Does validation impact performance?
+
+Yes, validation has a runtime cost:
+
+- **Zod**: ~10-50ms for typical schemas
+- **Valibot**: ~5-20ms (faster)
+- **Arktype**: ~5-15ms (fastest)
+
+For most applications, this is acceptable. For high-performance scenarios, consider:
+- Using faster schema libraries (Valibot, Arktype)
+- Validating only at boundaries
+- Skipping validation in production for trusted internal APIs
+
+### Should I use ts-contract in serverless functions?
+
+Yes! ts-contract works great in serverless environments. The small bundle size and zero dependencies (except your schema library) make it ideal for edge functions.
+
+## Troubleshooting
+
+### TypeScript can't infer my types
+
+Make sure you're using `typeof`:
+
+```ts
+// ✓ Correct
+type User = InferResponseBody<typeof contract.getUser, 200>;
+
+// ✗ Wrong
+type User = InferResponseBody<contract.getUser, 200>;
+```
+
+### Plugin methods don't exist
+
+Make sure you called `.build()`:
+
+```ts
+// ✗ Wrong - forgot .build()
+const api = initContract(contract).use(pathPlugin);
+
+// ✓ Correct
+const api = initContract(contract).use(pathPlugin).build();
+```
+
+### Validation fails unexpectedly
+
+1. Check that your data matches the schema
+2. Log the actual data being validated
+3. Verify schema definitions
+4. Check for Date vs string conversions
+
+### Path parameters don't match
+
+Ensure parameter names in `pathParams` match the placeholders in `path`:
+
+```ts
+// ✓ Correct - names match
+{
+  path: '/users/:userId',
+  pathParams: z.object({ userId: z.string() }),
+}
+
+// ✗ Wrong - names don't match
+{
+  path: '/users/:userId',
+  pathParams: z.object({ id: z.string() }),
+}
+```
+
+### Contract changes don't reflect in my app
+
+In a monorepo, rebuild the contract package:
+
+```bash
+cd packages/contract
+pnpm build
+```
+
+Or use watch mode during development:
+
+```bash
+pnpm dev
+```
+
+## Best Practices
+
+### Should I validate on both client and server?
+
+Yes! Validate at all boundaries:
+
+- **Client**: Validate API responses to ensure type safety
+- **Server**: Validate incoming requests to prevent bad data
+
+### How should I organize my contracts?
+
+Organize by domain, not by HTTP method:
+
+```ts
+// ✓ Good - organized by domain
+const contract = createContract({
+  users: { list: {}, get: {}, create: {} },
+  posts: { list: {}, get: {}, create: {} },
+});
+
+// ✗ Avoid - organized by method
+const contract = createContract({
+  get: { users: {}, posts: {} },
+  post: { users: {}, posts: {} },
+});
+```
+
+### Should I use a monorepo?
+
+Yes, if you have both frontend and backend in the same repository. A monorepo allows you to:
+
+- Share the contract between apps
+- Get automatic type updates
+- Ensure frontend and backend stay in sync
+
+See the [Monorepo Setup](/recipes/full-stack/monorepo) guide.
+
+### How do I handle breaking changes?
+
+1. Use API versioning in your paths
+2. Follow semantic versioning for your contract package
+3. Communicate breaking changes to consumers
+4. Consider deprecation periods for major changes
+
+## Comparison with Other Tools
+
+### ts-contract vs tRPC
+
+**ts-contract:**
+- ✅ Framework agnostic
+- ✅ Minimal bundle size
+- ✅ Works with any client/server
+- ❌ Manual integration required
+
+**tRPC:**
+- ✅ Automatic client generation
+- ✅ Built-in React hooks
+- ❌ Requires specific server/client setup
+- ❌ Larger bundle size
+
+### ts-contract vs OpenAPI/Swagger
+
+**ts-contract:**
+- ✅ TypeScript-first
+- ✅ No code generation
+- ✅ Compile-time type safety
+- ❌ No automatic API documentation UI
+
+**OpenAPI:**
+- ✅ Language agnostic
+- ✅ Automatic documentation UI
+- ❌ Requires code generation for types
+- ❌ Runtime overhead
+
+### ts-contract vs Zod + manual types
+
+**ts-contract:**
+- ✅ Organized contract structure
+- ✅ Built-in type helpers
+- ✅ Plugin system
+- ✅ Consistent patterns
+
+**Zod alone:**
+- ✅ More flexible
+- ❌ More boilerplate
+- ❌ Manual type extraction
+- ❌ No standardized structure
+
+## Getting Help
+
+### Where can I get help?
+
+- **Documentation**: Check the [guides](/guides/best-practices) and [recipes](/recipes/server/hono)
+- **GitHub Issues**: Report bugs or request features
+- **Examples**: See the [recipes](/recipes/server/hono) for working examples
+
+### How do I report a bug?
+
+Open an issue on GitHub with:
+1. Minimal reproduction
+2. Expected behavior
+3. Actual behavior
+4. TypeScript and ts-contract versions
+
+### How do I request a feature?
+
+Open an issue on GitHub describing:
+1. The use case
+2. Why existing features don't work
+3. Proposed API (if you have ideas)
+
+## Next Steps
+
+- Check out [Getting Started](/getting-started) for a quick introduction
+- See [Contracts](/core-concepts/contracts) for organizing your API
+- Explore [WebSocket Contracts](/core-concepts/websocket-contracts) for real-time APIs
+- Review [Type Inference](/core-concepts/type-inference) for extracting types
+- Check [Best Practices](/guides/best-practices) for production tips
+- Set up a [Monorepo](/recipes/full-stack/monorepo) for your project

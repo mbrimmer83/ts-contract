@@ -1,0 +1,383 @@
+---
+title: WebSocket Plugins
+description: Build type-safe WebSocket URLs and validate messages with WebSocket plugins.
+---
+
+## Overview
+
+WebSocket plugins extend your WebSocket contracts with runtime utilities for URL construction and message validation. Unlike HTTP plugins which use `.use()`, WebSocket plugins use `.useWebSocket()`.
+
+## Installation
+
+WebSocket plugins are included in `@ts-contract/plugins`:
+
+```bash
+pnpm add @ts-contract/plugins
+```
+
+## websocketPathPlugin
+
+The `websocketPathPlugin` adds a `buildPath()` method to each WebSocket definition for type-safe URL construction.
+
+### Basic Usage
+
+```ts
+import { createContract, initContract } from '@ts-contract/core';
+import { websocketPathPlugin } from '@ts-contract/plugins';
+import { z } from 'zod';
+
+const contract = createContract({
+  chat: {
+    type: 'websocket',
+    path: '/ws/chat/:roomId',
+    pathParams: z.object({ roomId: z.string() }),
+    query: z.object({ token: z.string().optional() }),
+    clientMessages: {},
+    serverMessages: {},
+  },
+});
+
+const api = initContract(contract)
+  .useWebSocket(websocketPathPlugin)
+  .build();
+
+// Build WebSocket URL
+const url = api.chat.buildPath({ roomId: '123' });
+// => "/ws/chat/123"
+
+// With query parameters
+const urlWithQuery = api.chat.buildPath(
+  { roomId: '123' },
+  { token: 'abc-token' }
+);
+// => "/ws/chat/123?token=abc-token"
+```
+
+### Type Safety
+
+TypeScript enforces correct parameter types:
+
+```ts
+// ✓ Valid
+api.chat.buildPath({ roomId: '123' });
+
+// ✗ Error: Type 'number' is not assignable to type 'string'
+api.chat.buildPath({ roomId: 123 });
+
+// ✗ Error: Property 'roomId' is missing
+api.chat.buildPath({});
+```
+
+### URL Encoding
+
+Path parameters and query values are automatically URL-encoded:
+
+```ts
+const url = api.chat.buildPath(
+  { roomId: 'room with spaces' },
+  { token: 'special@chars' }
+);
+// => "/ws/chat/room%20with%20spaces?token=special%40chars"
+```
+
+### Common Use Cases
+
+**Client-side WebSocket connections:**
+
+```ts
+const url = api.chat.buildPath({ roomId });
+const ws = new WebSocket(`wss://api.example.com${url}`);
+```
+
+**Phoenix.js integration:**
+
+```ts
+import { Socket } from 'phoenix';
+
+const path = api.chat.buildPath({ roomId: '123' });
+const socket = new Socket('/socket');
+const channel = socket.channel(`chat:${roomId}`);
+```
+
+## websocketValidatePlugin
+
+The `websocketValidatePlugin` adds validation methods for WebSocket messages and connection parameters.
+
+### Basic Usage
+
+```ts
+import { createContract, initContract } from '@ts-contract/core';
+import { websocketValidatePlugin } from '@ts-contract/plugins';
+import { z } from 'zod';
+
+const contract = createContract({
+  chat: {
+    type: 'websocket',
+    path: '/ws/chat/:roomId',
+    pathParams: z.object({ roomId: z.string() }),
+    clientMessages: {
+      new_msg: z.object({
+        type: z.literal('new_msg'),
+        body: z.string().min(1),
+      }),
+    },
+    serverMessages: {
+      new_msg: z.object({
+        type: z.literal('new_msg'),
+        id: z.string(),
+        body: z.string(),
+        userId: z.string(),
+      }),
+    },
+  },
+});
+
+const api = initContract(contract)
+  .useWebSocket(websocketValidatePlugin)
+  .build();
+```
+
+### Validation Methods
+
+#### validateClientMessage()
+
+Validates outgoing client messages:
+
+```ts
+validateClientMessage<EventName>(eventName: EventName, data: unknown)
+```
+
+**Example:**
+
+```ts
+// ✓ Valid
+const msg = api.chat.validateClientMessage('new_msg', {
+  type: 'new_msg',
+  body: 'Hello!',
+});
+
+// ✗ Throws validation error - missing body
+api.chat.validateClientMessage('new_msg', {
+  type: 'new_msg',
+});
+
+// ✗ Throws validation error - empty body
+api.chat.validateClientMessage('new_msg', {
+  type: 'new_msg',
+  body: '',
+});
+```
+
+#### validateServerMessage()
+
+Validates incoming server messages:
+
+```ts
+validateServerMessage<EventName>(eventName: EventName, data: unknown)
+```
+
+**Example:**
+
+```ts
+// ✓ Valid
+const msg = api.chat.validateServerMessage('new_msg', {
+  type: 'new_msg',
+  id: '123',
+  body: 'Hello from server',
+  userId: 'user-456',
+});
+
+// ✗ Throws validation error - missing userId
+api.chat.validateServerMessage('new_msg', {
+  type: 'new_msg',
+  id: '123',
+  body: 'Hello',
+});
+```
+
+#### validatePathParams()
+
+Validates WebSocket connection path parameters:
+
+```ts
+const params = api.chat.validatePathParams({ roomId: '123' });
+// => { roomId: '123' }
+```
+
+#### validateQuery()
+
+Validates WebSocket connection query parameters:
+
+```ts
+const query = api.chat.validateQuery({ token: 'abc' });
+// => { token: 'abc' }
+```
+
+#### validateHeaders()
+
+Validates WebSocket connection headers:
+
+```ts
+const contract = createContract({
+  chat: {
+    type: 'websocket',
+    path: '/ws/chat',
+    headers: {
+      authorization: z.string(),
+    },
+    clientMessages: {},
+    serverMessages: {},
+  },
+});
+
+const api = initContract(contract)
+  .useWebSocket(websocketValidatePlugin)
+  .build();
+
+const headers = api.chat.validateHeaders({
+  authorization: 'Bearer token',
+});
+```
+
+## Using Both Plugins Together
+
+Most applications use both plugins:
+
+```ts
+import { websocketPathPlugin, websocketValidatePlugin } from '@ts-contract/plugins';
+
+const api = initContract(contract)
+  .useWebSocket(websocketPathPlugin)
+  .useWebSocket(websocketValidatePlugin)
+  .build();
+
+// Build URL
+const url = api.chat.buildPath({ roomId: '123' });
+
+// Validate outgoing message
+const msg = api.chat.validateClientMessage('new_msg', {
+  type: 'new_msg',
+  body: 'Hello!',
+});
+
+// Validate incoming message
+channel.on('new_msg', (data) => {
+  const validated = api.chat.validateServerMessage('new_msg', data);
+  console.log(validated.body);
+});
+```
+
+## Client-Side Integration
+
+### Phoenix.js Example
+
+```ts
+import { Socket } from 'phoenix';
+
+const socket = new Socket('/socket', {
+  params: { token: userToken },
+});
+
+socket.connect();
+
+const roomId = '123';
+const topic = `chat:${roomId}`;
+const channel = socket.channel(topic, {});
+
+// Validate and handle incoming messages
+channel.on('new_msg', (data: unknown) => {
+  try {
+    const msg = api.chat.validateServerMessage('new_msg', data);
+    displayMessage(msg);
+  } catch (error) {
+    console.error('Invalid message:', error);
+  }
+});
+
+// Send validated messages
+function sendMessage(body: string) {
+  const msg = api.chat.validateClientMessage('new_msg', {
+    type: 'new_msg',
+    body,
+  });
+  
+  channel.push('new_msg', msg)
+    .receive('ok', () => console.log('Sent'))
+    .receive('error', (err) => console.error('Failed:', err));
+}
+
+channel.join();
+```
+
+### Native WebSocket Example
+
+```ts
+const url = api.chat.buildPath({ roomId: '123' });
+const ws = new WebSocket(`wss://api.example.com${url}`);
+
+ws.onmessage = (event) => {
+  const data = JSON.parse(event.data);
+  
+  try {
+    const msg = api.chat.validateServerMessage('new_msg', data);
+    console.log('Received:', msg.body);
+  } catch (error) {
+    console.error('Invalid message:', error);
+  }
+};
+
+function sendMessage(body: string) {
+  const msg = api.chat.validateClientMessage('new_msg', {
+    type: 'new_msg',
+    body,
+  });
+  
+  ws.send(JSON.stringify(msg));
+}
+```
+
+## Error Handling
+
+Validation errors include descriptive messages:
+
+```ts
+try {
+  api.chat.validateClientMessage('new_msg', {
+    type: 'new_msg',
+    body: '', // Empty string
+  });
+} catch (error) {
+  console.error(error.message);
+  // => "Validation failed for client message 'new_msg' of /ws/chat/:roomId: String must contain at least 1 character(s)"
+}
+```
+
+## Type Safety
+
+All validation methods return properly typed results:
+
+```ts
+// TypeScript knows the exact message type
+const msg = api.chat.validateClientMessage('new_msg', data);
+// msg is typed as: { type: 'new_msg', body: string }
+
+const serverMsg = api.chat.validateServerMessage('new_msg', data);
+// serverMsg is typed as: { type: 'new_msg', id: string, body: string, userId: string }
+```
+
+## Performance Considerations
+
+- **websocketPathPlugin**: Minimal overhead (~500 bytes minified)
+- **websocketValidatePlugin**: Depends on schema library (Zod, Valibot, etc.)
+
+Validation is recommended at system boundaries:
+- ✅ Validate incoming messages from server
+- ✅ Validate outgoing messages before sending
+- ❌ Skip validation for internal message processing
+
+## Next Steps
+
+- See [WebSocket Contracts](/core-concepts/websocket-contracts) for contract definition
+- Explore [Phoenix.js Chat Recipe](/recipes/websocket/phoenix-chat) for complete example
+- Learn about [Creating Custom Plugins](/plugins/creating-custom-plugins)
+- Review [Plugin System](/core-concepts/plugin-system) for how plugins work

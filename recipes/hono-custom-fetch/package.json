@@ -1,0 +1,24 @@
+{
+  "name": "@ts-contract-recipes/hono-custom-fetch",
+  "version": "1.0.0",
+  "private": true,
+  "type": "module",
+  "scripts": {
+    "dev": "tsx watch src/index.ts",
+    "build": "tsc",
+    "start": "node dist/index.js",
+    "type-check": "tsc --noEmit",
+    "test": "tsx --test src/lib/api-client.test.ts"
+  },
+  "dependencies": {
+    "@ts-contract/core": "workspace:*",
+    "@ts-contract/plugins": "workspace:*",
+    "hono": "^3.12.8",
+    "zod": "^4.3.6"
+  },
+  "devDependencies": {
+    "@types/node": "^20.10.6",
+    "tsx": "^4.7.0",
+    "typescript": "^5.3.3"
+  }
+}

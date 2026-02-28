@@ -1,0 +1,890 @@
+---
+title: Best Practices
+description: Best practices and patterns for using ts-contract effectively in production applications.
+---
+
+## Contract Design
+
+### Use Shared Schemas
+
+Extract common schemas to avoid duplication:
+
+```ts
+import { z } from 'zod';
+
+// Shared schemas
+const UserSchema = z.object({
+  id: z.string(),
+  name: z.string(),
+  email: z.string().email(),
+});
+
+const ErrorSchema = z.object({
+  message: z.string(),
+});
+
+const PaginationSchema = z.object({
+  page: z.string().optional(),
+  limit: z.string().optional(),
+});
+
+// Use in contract
+const contract = createContract({
+  users: {
+    list: {
+      method: 'GET',
+      path: '/users',
+      query: PaginationSchema,
+      responses: {
+        200: z.object({
+          users: z.array(UserSchema),
+          total: z.number(),
+        }),
+        500: ErrorSchema,
+      },
+    },
+    get: {
+      method: 'GET',
+      path: '/users/:id',
+      pathParams: z.object({ id: z.string() }),
+      responses: {
+        200: UserSchema,
+        404: ErrorSchema,
+      },
+    },
+  },
+});
+```
+
+### Version Your APIs
+
+Include version in the path for breaking changes:
+
+```ts
+const contract = createContract({
+  v1: {
+    users: {
+      get: {
+        method: 'GET',
+        path: '/api/v1/users/:id',
+        // ...
+      },
+    },
+  },
+  v2: {
+    users: {
+      get: {
+        method: 'GET',
+        path: '/api/v2/users/:id',
+        // Different schema for v2
+      },
+    },
+  },
+});
+```
+
+### Document with Summaries
+
+Use the `summary` field for documentation:
+
+```ts
+const contract = createContract({
+  users: {
+    get: {
+      method: 'GET',
+      path: '/users/:id',
+      pathParams: z.object({ id: z.string() }),
+      responses: {
+        200: UserSchema,
+        404: ErrorSchema,
+      },
+      summary: 'Retrieve a user by their unique identifier',
+    },
+  },
+});
+```
+
+### Use Metadata for Custom Properties
+
+Store additional information in `metadata`:
+
+```ts
+const contract = createContract({
+  users: {
+    get: {
+      method: 'GET',
+      path: '/users/:id',
+      pathParams: z.object({ id: z.string() }),
+      responses: {
+        200: UserSchema,
+      },
+      metadata: {
+        requiresAuth: true,
+        rateLimit: 100,
+        cacheTTL: 300,
+        tags: ['users', 'public'],
+      },
+    },
+  },
+});
+```
+
+## Type Safety
+
+### Always Use `typeof`
+
+When extracting types, always use `typeof`:
+
+```ts
+// ✓ Correct
+type User = InferResponseBody<typeof contract.users.get, 200>;
+
+// ✗ Wrong
+type User = InferResponseBody<contract.users.get, 200>;
+```
+
+### Avoid `any` and Type Assertions
+
+Let TypeScript infer types from your contract:
+
+```ts
+// ✓ Good
+const user = api.users.get.validateResponse(200, data);
+// user is properly typed
+
+// ✗ Avoid
+const user = data as any;
+const user = data as User; // Only if absolutely necessary
+```
+
+### Use Type Guards for Unions
+
+Create type guards for discriminated unions:
+
+```ts
+type Response = 
+  | { status: 200; body: User }
+  | { status: 404; body: { message: string } };
+
+function isSuccessResponse(res: Response): res is { status: 200; body: User } {
+  return res.status === 200;
+}
+
+if (isSuccessResponse(response)) {
+  console.log(response.body.name); // TypeScript knows this is User
+}
+```
+
+### Export Types from Contract Package
+
+In a monorepo, export types from your contract package:
+
+```ts
+// packages/contract/src/types.ts
+export type User = InferResponseBody<typeof contract.users.get, 200>;
+export type CreateUserBody = InferBody<typeof contract.users.create>;
+export type UpdateUserBody = InferBody<typeof contract.users.update>;
+
+// apps/api/src/routes/users.ts
+import type { User, CreateUserBody } from '@my-app/contract';
+```
+
+## Validation
+
+### Validate at Boundaries
+
+Always validate data at system boundaries:
+
+```ts
+// ✓ Good - validate incoming data
+app.post('/users', (req, res) => {
+  const body = api.users.create.validateBody(req.body);
+  const user = await database.createUser(body);
+  res.json(user);
+});
+
+// ✗ Bad - no validation
+app.post('/users', (req, res) => {
+  const user = await database.createUser(req.body);
+  res.json(user);
+});
+```
+
+### Validate API Responses
+
+Validate responses from external APIs:
+
+```ts
+// ✓ Good
+async function fetchUser(id: string) {
+  const response = await fetch(`/api/users/${id}`);
+  const data = await response.json();
+  return api.users.get.validateResponse(200, data);
+}
+
+// ✗ Bad - no validation
+async function fetchUser(id: string) {
+  const response = await fetch(`/api/users/${id}`);
+  return response.json();
+}
+```
+
+### Handle Validation Errors
+
+Provide meaningful error messages:
+
+```ts
+try {
+  const body = api.users.create.validateBody(req.body);
+} catch (error) {
+  if (error.name === 'ZodError') {
+    return res.status(400).json({
+      message: 'Validation failed',
+      errors: error.errors.map(e => ({
+        field: e.path.join('.'),
+        message: e.message,
+      })),
+    });
+  }
+  throw error;
+}
+```
+
+### Conditional Validation
+
+Skip validation in trusted environments:
+
+```ts
+const shouldValidate = process.env.NODE_ENV !== 'production';
+
+async function fetchUser(id: string) {
+  const response = await fetch(`/api/users/${id}`);
+  const data = await response.json();
+  
+  return shouldValidate
+    ? api.users.get.validateResponse(200, data)
+    : data;
+}
+```
+
+## Plugin Usage
+
+### Initialize Once, Export
+
+Create your enhanced contract once:
+
+```ts
+// api.ts
+import { initContract } from '@ts-contract/core';
+import { pathPlugin, validatePlugin } from '@ts-contract/plugins';
+import { contract } from './contract';
+
+export const api = initContract(contract)
+  .use(pathPlugin)
+  .use(validatePlugin)
+  .build();
+```
+
+```ts
+// Other files
+import { api } from './api';
+```
+
+### Use Plugins Consistently
+
+Apply the same plugins across your application:
+
+```ts
+// ✓ Good - consistent
+const api = initContract(contract)
+  .use(pathPlugin)
+  .use(validatePlugin)
+  .build();
+
+// ✗ Avoid - inconsistent
+const clientApi = initContract(contract).use(pathPlugin).build();
+const serverApi = initContract(contract).use(validatePlugin).build();
+```
+
+### Choose Plugins Based on Needs
+
+**Client-side:**
+```ts
+// Client needs both path building and validation
+const api = initContract(contract)
+  .use(pathPlugin)
+  .use(validatePlugin)
+  .build();
+```
+
+**Server-side:**
+```ts
+// Server only needs validation (paths are defined by framework)
+const api = initContract(contract)
+  .use(validatePlugin)
+  .build();
+```
+
+## Error Handling
+
+### Use Consistent Error Responses
+
+Define standard error schemas:
+
+```ts
+const ErrorSchema = z.object({
+  message: z.string(),
+  code: z.string().optional(),
+  details: z.record(z.any()).optional(),
+});
+
+const contract = createContract({
+  users: {
+    get: {
+      method: 'GET',
+      path: '/users/:id',
+      pathParams: z.object({ id: z.string() }),
+      responses: {
+        200: UserSchema,
+        400: ErrorSchema,
+        401: ErrorSchema,
+        404: ErrorSchema,
+        500: ErrorSchema,
+      },
+    },
+  },
+});
+```
+
+### Create Custom Error Classes
+
+```ts
+export class ApiError extends Error {
+  constructor(
+    message: string,
+    public status: number,
+    public code?: string,
+    public details?: Record<string, any>
+  ) {
+    super(message);
+    this.name = 'ApiError';
+  }
+}
+
+// Usage
+throw new ApiError('User not found', 404, 'USER_NOT_FOUND');
+```
+
+### Handle Errors Gracefully
+
+```ts
+async function fetchUser(id: string) {
+  try {
+    const response = await fetch(`/api/users/${id}`);
+    
+    if (!response.ok) {
+      if (response.status === 404) {
+        const error = await response.json();
+        throw new ApiError(error.message, 404);
+      }
+      throw new ApiError('Request failed', response.status);
+    }
+    
+    const data = await response.json();
+    return api.users.get.validateResponse(200, data);
+  } catch (error) {
+    if (error instanceof ApiError) {
+      // Handle API errors
+      console.error('API Error:', error.message);
+    } else {
+      // Handle network errors
+      console.error('Network Error:', error);
+    }
+    throw error;
+  }
+}
+```
+
+## Performance
+
+### Minimize Bundle Size
+
+Only import what you need:
+
+```ts
+// ✓ Good - tree-shakeable
+import { createContract } from '@ts-contract/core';
+import { pathPlugin } from '@ts-contract/plugins';
+
+// ✗ Avoid - imports everything
+import * as tsContract from '@ts-contract/core';
+```
+
+
+### Conditional Validation
+
+Validate only in development or at boundaries:
+
+```ts
+const shouldValidate = process.env.NODE_ENV !== 'production';
+
+async function fetchUser(id: string) {
+  const response = await fetch(api.users.get.buildPath({ id }));
+  const data = await response.json();
+  return shouldValidate ? api.users.get.validateResponse(200, data) : data;
+}
+```
+
+### Skip Validation in Production
+
+For trusted internal APIs:
+
+```ts
+const api = process.env.NODE_ENV === 'production'
+  ? initContract(contract).use(pathPlugin).build()
+  : initContract(contract).use(pathPlugin).use(validatePlugin).build();
+```
+
+## WebSocket Contracts
+
+### Message Type Discriminators
+
+Always include type discriminators matching event names:
+
+```ts
+const contract = createContract({
+  chat: {
+    type: 'websocket',
+    path: '/ws/chat/:roomId',
+    pathParams: z.object({ roomId: z.string() }),
+    clientMessages: {
+      // ✓ Good - type matches event name
+      new_msg: z.object({
+        type: z.literal('new_msg'),
+        body: z.string(),
+      }),
+      // ✗ Avoid - missing type discriminator
+      typing: z.object({
+        isTyping: z.boolean(),
+      }),
+    },
+    serverMessages: {
+      new_msg: z.object({
+        type: z.literal('new_msg'),
+        id: z.string(),
+        body: z.string(),
+      }),
+    },
+  },
+});
+```
+
+### Organize by Channel/Topic
+
+Group WebSocket definitions by channel or topic:
+
+```ts
+const contract = createContract({
+  websockets: {
+    chat: { type: 'websocket', path: '/ws/chat/:roomId', /* ... */ },
+    notifications: { type: 'websocket', path: '/ws/notifications', /* ... */ },
+    presence: { type: 'websocket', path: '/ws/presence/:userId', /* ... */ },
+  },
+});
+```
+
+### Validate Messages at Boundaries
+
+Validate incoming and outgoing WebSocket messages:
+
+```ts
+// Validate incoming messages
+channel.on('new_msg', (data: unknown) => {
+  try {
+    const msg = api.chat.validateServerMessage('new_msg', data);
+    handleMessage(msg);
+  } catch (error) {
+    console.error('Invalid message:', error);
+  }
+});
+
+// Validate outgoing messages
+function sendMessage(body: string) {
+  const msg = api.chat.validateClientMessage('new_msg', {
+    type: 'new_msg',
+    body,
+  });
+  channel.push('new_msg', msg);
+}
+```
+
+## Testing
+
+### Test Contract Definitions
+
+```ts
+import { describe, it, expect } from 'vitest';
+import { contract } from './contract';
+
+describe('Contract', () => {
+  it('has correct structure', () => {
+    expect(contract.users.get.method).toBe('GET');
+    expect(contract.users.get.path).toBe('/users/:id');
+  });
+});
+```
+
+### Test Type Inference
+
+```ts
+import { describe, it, expectTypeOf } from 'vitest';
+import type { InferResponseBody } from '@ts-contract/core';
+import { contract } from './contract';
+
+describe('Type Inference', () => {
+  it('infers correct user type', () => {
+    type User = InferResponseBody<typeof contract.users.get, 200>;
+    
+    expectTypeOf<User>().toHaveProperty('id');
+    expectTypeOf<User>().toHaveProperty('name');
+    expectTypeOf<User>().toHaveProperty('email');
+  });
+});
+```
+
+### Test Validation
+
+```ts
+import { describe, it, expect } from 'vitest';
+import { api } from './api';
+
+describe('Validation', () => {
+  it('validates correct data', () => {
+    const validUser = {
+      id: '1',
+      name: 'Alice',
+      email: 'alice@example.com',
+    };
+    
+    expect(() => {
+      api.users.get.validateResponse(200, validUser);
+    }).not.toThrow();
+  });
+  
+  it('rejects invalid data', () => {
+    const invalidUser = {
+      id: '1',
+      name: 'Alice',
+      // Missing email
+    };
+    
+    expect(() => {
+      api.users.get.validateResponse(200, invalidUser);
+    }).toThrow();
+  });
+});
+```
+
+### Mock API Responses
+
+```ts
+import { vi } from 'vitest';
+
+vi.mock('./api-client', () => ({
+  fetchUser: vi.fn().mockResolvedValue({
+    id: '1',
+    name: 'Alice',
+    email: 'alice@example.com',
+  }),
+}));
+```
+
+## Code Organization
+
+### Monorepo Structure
+
+```
+my-monorepo/
+├── packages/
+│   └── contract/
+│       ├── src/
+│       │   ├── index.ts
+│       │   ├── contract.ts
+│       │   ├── api.ts
+│       │   ├── types.ts
+│       │   └── schemas/
+│       │       ├── user.ts
+│       │       ├── post.ts
+│       │       └── common.ts
+│       └── package.json
+├── apps/
+│   ├── api/
+│   └── web/
+└── package.json
+```
+
+### Separate Concerns
+
+```ts
+// schemas/user.ts
+export const UserSchema = z.object({
+  id: z.string(),
+  name: z.string(),
+  email: z.string().email(),
+});
+
+// schemas/common.ts
+export const ErrorSchema = z.object({
+  message: z.string(),
+});
+
+export const PaginationSchema = z.object({
+  page: z.string().optional(),
+  limit: z.string().optional(),
+});
+
+// contract.ts
+import { UserSchema } from './schemas/user';
+import { ErrorSchema, PaginationSchema } from './schemas/common';
+
+export const contract = createContract({
+  users: {
+    list: {
+      query: PaginationSchema,
+      responses: {
+        200: z.object({
+          users: z.array(UserSchema),
+          total: z.number(),
+        }),
+        500: ErrorSchema,
+      },
+    },
+  },
+});
+```
+
+### Export Everything
+
+```ts
+// index.ts
+export { contract } from './contract';
+export { api } from './api';
+export * from './types';
+export * from './schemas/user';
+export * from './schemas/common';
+```
+
+## Security
+
+### Validate User Input
+
+Always validate and sanitize user input:
+
+```ts
+app.post('/users', (req, res) => {
+  try {
+    const body = api.users.create.validateBody(req.body);
+    // body is validated and sanitized
+    const user = await database.createUser(body);
+    res.json(user);
+  } catch (error) {
+    res.status(400).json({ message: 'Invalid input' });
+  }
+});
+```
+
+### Don't Expose Internal Errors
+
+```ts
+// ✓ Good
+app.use((err, req, res, next) => {
+  console.error(err); // Log internally
+  res.status(500).json({ message: 'Internal server error' });
+});
+
+// ✗ Bad - exposes stack traces
+app.use((err, req, res, next) => {
+  res.status(500).json({ message: err.message, stack: err.stack });
+});
+```
+
+### Use Environment Variables
+
+```ts
+const API_BASE_URL = process.env.API_URL || 'http://localhost:3000';
+const JWT_SECRET = process.env.JWT_SECRET;
+
+if (!JWT_SECRET) {
+  throw new Error('JWT_SECRET is required');
+}
+```
+
+### Rate Limit Endpoints
+
+```ts
+import rateLimit from 'express-rate-limit';
+
+const limiter = rateLimit({
+  windowMs: 15 * 60 * 1000,
+  max: 100,
+});
+
+app.use('/api/', limiter);
+```
+
+## Documentation
+
+### Document Your Contract
+
+Add comments to your contract:
+
+```ts
+/**
+ * User management API endpoints
+ */
+export const contract = createContract({
+  users: {
+    /**
+     * Retrieve a user by ID
+     * @requires Authentication
+     */
+    get: {
+      method: 'GET',
+      path: '/users/:id',
+      pathParams: z.object({ id: z.string() }),
+      responses: {
+        200: UserSchema,
+        404: ErrorSchema,
+      },
+      summary: 'Get user by ID',
+    },
+  },
+});
+```
+
+### Generate API Documentation
+
+Use metadata to generate docs:
+
+```ts
+function generateDocs(contract: any) {
+  for (const [key, route] of Object.entries(contract)) {
+    if ('method' in route) {
+      console.log(`${route.method} ${route.path}`);
+      console.log(`Summary: ${route.summary}`);
+      console.log(`Metadata:`, route.metadata);
+    }
+  }
+}
+```
+
+### Keep README Updated
+
+Document your contract package:
+
+```markdown
+# @my-app/contract
+
+Shared API contract for My App.
+
+## Installation
+
+\`\`\`bash
+pnpm add @my-app/contract
+\`\`\`
+
+## Usage
+
+\`\`\`ts
+import { api, type User } from '@my-app/contract';
+
+const user = await fetchUser('123');
+\`\`\`
+```
+
+## Deployment
+
+### Build Contract Package
+
+```json
+{
+  "scripts": {
+    "build": "tsc",
+    "prepublishOnly": "pnpm build"
+  }
+}
+```
+
+### Version Carefully
+
+Use semantic versioning for breaking changes (major), new features (minor), and bug fixes (patch).
+
+## Common Pitfalls
+
+### Don't Mix Concerns
+
+```ts
+// ✗ Bad - mixing business logic with contract
+const contract = createContract({
+  users: {
+    get: {
+      method: 'GET',
+      path: '/users/:id',
+      responses: {
+        200: UserSchema,
+      },
+      // Don't add business logic here
+      handler: async (id) => database.findUser(id),
+    },
+  },
+});
+```
+
+### Don't Over-Validate
+
+```ts
+// ✗ Bad - validating trusted internal data
+function processUser(user: User) {
+  // Don't validate if you already know it's valid
+  const validated = api.users.get.validateResponse(200, user);
+  // ...
+}
+
+// ✓ Good - only validate at boundaries
+async function fetchUser(id: string) {
+  const response = await fetch(`/api/users/${id}`);
+  const data = await response.json();
+  return api.users.get.validateResponse(200, data);
+}
+```
+
+### Don't Ignore TypeScript Errors
+
+```ts
+// ✗ Bad - using @ts-ignore
+// @ts-ignore
+const user = api.users.get.buildPath({ id: 123 });
+
+// ✓ Good - fix the type error
+const user = api.users.get.buildPath({ id: '123' });
+```
+
+## Summary
+
+1. **Design contracts around domains**, not technical layers
+2. **Use shared schemas** to avoid duplication
+3. **Always validate at boundaries** (API responses, user input)
+4. **Export types** from your contract package
+5. **Initialize plugins once** and export
+6. **Handle errors gracefully** with consistent error schemas
+7. **Test your contracts** and type inference
+8. **Document your API** with summaries and metadata
+9. **Use semantic versioning** for breaking changes
+10. **Keep security in mind** - validate input, don't expose internals
+
+## Next Steps
+
+- Review [Contracts](/core-concepts/contracts) for organizing your API
+- See [WebSocket Contracts](/core-concepts/websocket-contracts) for real-time APIs
+- Explore [Type Inference](/core-concepts/type-inference) for extracting types
+- Check out [FAQ](/guides/faq) for common questions

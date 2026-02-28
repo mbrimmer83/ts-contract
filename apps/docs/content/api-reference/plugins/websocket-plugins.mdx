@@ -1,0 +1,299 @@
+---
+title: WebSocket Plugins API
+description: Complete API reference for WebSocket plugins.
+---
+
+## websocketPathPlugin
+
+Adds `buildPath()` method to WebSocket definitions for type-safe URL construction.
+
+### Import
+
+```ts
+import { websocketPathPlugin } from '@ts-contract/plugins';
+```
+
+### Usage
+
+```ts
+const api = initContract(contract)
+  .useWebSocket(websocketPathPlugin)
+  .build();
+```
+
+### Methods
+
+#### buildPath()
+
+Build a WebSocket URL with path parameters and query strings.
+
+**Signature:**
+
+```ts
+buildPath(params?, query?): string
+```
+
+**Parameters:**
+
+- `params` - Path parameters (required if WebSocket has `pathParams`)
+- `query` - Query string parameters (optional if WebSocket has `query`)
+
+**Returns:** Complete URL string with interpolated parameters
+
+**Examples:**
+
+```ts
+// Simple path
+api.chat.buildPath();
+// => "/ws/chat"
+
+// With path parameters
+api.chat.buildPath({ roomId: '123' });
+// => "/ws/chat/123"
+
+// With query parameters
+api.chat.buildPath({ roomId: '123' }, { token: 'abc' });
+// => "/ws/chat/123?token=abc"
+
+// URL encoding
+api.chat.buildPath({ roomId: 'room with spaces' });
+// => "/ws/chat/room%20with%20spaces"
+```
+
+**Type Safety:**
+
+TypeScript enforces correct parameter types based on the WebSocket definition:
+
+```ts
+// ✓ Valid
+api.chat.buildPath({ roomId: '123' });
+
+// ✗ Error: Type 'number' is not assignable to type 'string'
+api.chat.buildPath({ roomId: 123 });
+
+// ✗ Error: Property 'roomId' is missing
+api.chat.buildPath({});
+```
+
+---
+
+## websocketValidatePlugin
+
+Adds validation methods for WebSocket messages and connection parameters.
+
+### Import
+
+```ts
+import { websocketValidatePlugin } from '@ts-contract/plugins';
+```
+
+### Usage
+
+```ts
+const api = initContract(contract)
+  .useWebSocket(websocketValidatePlugin)
+  .build();
+```
+
+### Methods
+
+#### validateClientMessage()
+
+Validates outgoing client messages against the schema.
+
+**Signature:**
+
+```ts
+validateClientMessage<EventName>(eventName: EventName, data: unknown): InferClientMessage<WS, EventName>
+```
+
+**Parameters:**
+
+- `eventName` - The event/message name
+- `data` - The message data to validate
+
+**Returns:** Validated and typed message data
+
+**Throws:** Validation error if data doesn't match schema
+
+**Example:**
+
+```ts
+const msg = api.chat.validateClientMessage('new_msg', {
+  type: 'new_msg',
+  body: 'Hello!',
+});
+// msg is typed as: { type: 'new_msg', body: string }
+```
+
+---
+
+#### validateServerMessage()
+
+Validates incoming server messages against the schema.
+
+**Signature:**
+
+```ts
+validateServerMessage<EventName>(eventName: EventName, data: unknown): InferServerMessage<WS, EventName>
+```
+
+**Parameters:**
+
+- `eventName` - The event/message name
+- `data` - The message data to validate
+
+**Returns:** Validated and typed message data
+
+**Throws:** Validation error if data doesn't match schema
+
+**Example:**
+
+```ts
+channel.on('new_msg', (data: unknown) => {
+  const msg = api.chat.validateServerMessage('new_msg', data);
+  // msg is typed as: { type: 'new_msg', id: string, body: string, userId: string }
+  console.log(msg.body);
+});
+```
+
+---
+
+#### validatePathParams()
+
+Validates WebSocket connection path parameters.
+
+**Signature:**
+
+```ts
+validatePathParams(params: unknown): InferWebSocketPathParams<WS>
+```
+
+**Parameters:**
+
+- `params` - Path parameters to validate
+
+**Returns:** Validated and typed path parameters
+
+**Throws:** Validation error if params don't match schema
+
+**Example:**
+
+```ts
+const params = api.chat.validatePathParams({ roomId: '123' });
+// params is typed as: { roomId: string }
+```
+
+---
+
+#### validateQuery()
+
+Validates WebSocket connection query parameters.
+
+**Signature:**
+
+```ts
+validateQuery(query: unknown): InferWebSocketQuery<WS>
+```
+
+**Parameters:**
+
+- `query` - Query parameters to validate
+
+**Returns:** Validated and typed query parameters
+
+**Throws:** Validation error if query doesn't match schema
+
+**Example:**
+
+```ts
+const query = api.chat.validateQuery({ token: 'abc-token' });
+// query is typed as: { token?: string }
+```
+
+---
+
+#### validateHeaders()
+
+Validates WebSocket connection headers.
+
+**Signature:**
+
+```ts
+validateHeaders(headers: Record<string, unknown>): InferWebSocketHeaders<WS>
+```
+
+**Parameters:**
+
+- `headers` - Headers to validate
+
+**Returns:** Validated and typed headers
+
+**Throws:** Validation error if headers don't match schema
+
+**Example:**
+
+```ts
+const headers = api.chat.validateHeaders({
+  authorization: 'Bearer token123',
+});
+// headers is typed as: { authorization: string }
+```
+
+---
+
+## Error Handling
+
+All validation methods throw descriptive errors when validation fails:
+
+```ts
+try {
+  api.chat.validateClientMessage('new_msg', {
+    type: 'new_msg',
+    body: '', // Empty string fails min length validation
+  });
+} catch (error) {
+  console.error(error.message);
+  // => "Validation failed for client message 'new_msg' of /ws/chat/:roomId: String must contain at least 1 character(s)"
+}
+```
+
+Error messages include:
+- What failed (client message, server message, path params, query, headers)
+- Which WebSocket definition (path)
+- Specific validation issues from your schema library
+
+## Type Inference
+
+All validation methods return properly typed results based on your WebSocket contract:
+
+```ts
+import type {
+  InferClientMessage,
+  InferServerMessage,
+  InferWebSocketPathParams,
+} from '@ts-contract/core';
+
+type ClientMsg = InferClientMessage<typeof contract.chat, 'new_msg'>;
+type ServerMsg = InferServerMessage<typeof contract.chat, 'new_msg'>;
+type Params = InferWebSocketPathParams<typeof contract.chat>;
+
+// Validation methods return these exact types
+const msg: ClientMsg = api.chat.validateClientMessage('new_msg', data);
+const serverMsg: ServerMsg = api.chat.validateServerMessage('new_msg', data);
+const params: Params = api.chat.validatePathParams(data);
+```
+
+## Performance
+
+- **websocketPathPlugin**: ~500 bytes minified + gzipped
+- **websocketValidatePlugin**: ~800 bytes minified + gzipped (plus schema library)
+
+Validation overhead depends on your schema library (Zod, Valibot, Arktype).
+
+## See Also
+
+- [WebSocket Plugins Guide](/plugins/websocket-plugins) - Detailed usage guide
+- [WebSocket Contracts](/core-concepts/websocket-contracts) - Contract definition
+- [Type Helpers](/api-reference/core/type-helpers) - Type inference utilities
+- [Phoenix.js Chat Recipe](/recipes/websocket/phoenix-chat) - Complete example

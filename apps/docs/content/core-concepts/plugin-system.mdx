@@ -1,0 +1,266 @@
+---
+title: Plugin System
+description: Extend your contracts with composable plugins for runtime utilities and enhanced functionality.
+---
+
+## Plugin System Overview
+
+The plugin system in ts-contract allows you to extend your contracts with runtime utilities while maintaining full type safety. Plugins add methods to each route in your contract, enabling features like path building, validation, and custom functionality.
+
+**Philosophy:** Plugins are opt-in and composable. Start with a minimal contract and add only the capabilities you need.
+
+## Basic Plugin Usage
+
+Use `initContract()` to create a builder, compose plugins with `.use()`, and call `.build()` to produce an enhanced contract:
+
+```ts
+import { createContract, initContract } from '@ts-contract/core';
+import { pathPlugin, validatePlugin } from '@ts-contract/plugins';
+import { z } from 'zod';
+
+const contract = createContract({
+  getUser: {
+    method: 'GET',
+    path: '/users/:id',
+    pathParams: z.object({ id: z.string() }),
+    responses: {
+      200: z.object({
+        id: z.string(),
+        name: z.string(),
+        email: z.string().email(),
+      }),
+    },
+  },
+});
+
+// Initialize and add plugins
+const api = initContract(contract)
+  .use(pathPlugin)
+  .use(validatePlugin)
+  .build();
+
+// Now routes have plugin methods
+const url = api.getUser.buildPath({ id: '123' });
+// => "/users/123"
+
+const user = api.getUser.validateResponse(200, {
+  id: '123',
+  name: 'Alice',
+  email: 'alice@example.com',
+});
+// => { id: '123', name: 'Alice', email: 'alice@example.com' }
+```
+
+
+## How Plugins Extend Routes
+
+Plugins add methods to each route in your contract. The methods are fully type-safe based on the route definition:
+
+```ts
+import { createContract, initContract } from '@ts-contract/core';
+import { pathPlugin, validatePlugin } from '@ts-contract/plugins';
+import { z } from 'zod';
+
+const contract = createContract({
+  getUser: {
+    method: 'GET',
+    path: '/users/:id',
+    pathParams: z.object({ id: z.string() }),
+    query: z.object({ include: z.string().optional() }),
+    responses: {
+      200: z.object({ id: z.string(), name: z.string() }),
+    },
+  },
+});
+
+const api = initContract(contract)
+  .use(pathPlugin)
+  .use(validatePlugin)
+  .build();
+
+// pathPlugin adds buildPath()
+api.getUser.buildPath({ id: '123' });
+api.getUser.buildPath({ id: '123' }, { include: 'profile' });
+
+// validatePlugin adds validation methods
+api.getUser.validatePathParams({ id: '123' });
+api.getUser.validateQuery({ include: 'profile' });
+api.getUser.validateResponse(200, { id: '123', name: 'Alice' });
+```
+
+## Plugin Execution Order
+
+Plugins are applied in the order you call `.use()`. If plugins add methods with the same name, later plugins override earlier ones.
+
+## Type Safety with Plugins
+
+Plugins use TypeScript's declaration merging to provide full type safety. The types are automatically inferred based on your route definitions:
+
+```ts
+const contract = createContract({
+  getUser: {
+    method: 'GET',
+    path: '/users/:id',
+    pathParams: z.object({ id: z.string() }),
+    responses: {
+      200: z.object({ id: z.string(), name: z.string() }),
+      404: z.object({ message: z.string() }),
+    },
+  },
+});
+
+const api = initContract(contract)
+  .use(pathPlugin)
+  .use(validatePlugin)
+  .build();
+
+// TypeScript knows the exact parameter types
+api.getUser.buildPath({ id: '123' }); // ✓ Valid
+api.getUser.buildPath({ id: 123 });   // ✗ Error: id must be string
+
+// TypeScript knows the response types by status code
+api.getUser.validateResponse(200, { id: '123', name: 'Alice' }); // ✓ Valid
+api.getUser.validateResponse(200, { id: '123' });                // ✗ Error: missing name
+api.getUser.validateResponse(404, { message: 'Not found' });     // ✓ Valid
+```
+
+## Built-in Plugins
+
+ts-contract provides two built-in plugins:
+
+### pathPlugin
+
+Adds `buildPath()` method for type-safe URL construction:
+
+```ts
+import { pathPlugin } from '@ts-contract/plugins';
+
+const api = initContract(contract)
+  .use(pathPlugin)
+  .build();
+
+// Build paths with parameters
+api.getUser.buildPath({ id: '123' });
+// => "/users/123"
+
+// Build paths with query strings
+api.listUsers.buildPath(undefined, { page: '2', limit: '10' });
+// => "/users?page=2&limit=10"
+```
+
+Learn more: [Path Plugin](/plugins/path-plugin)
+
+### validatePlugin
+
+Adds validation methods for runtime schema validation:
+
+```ts
+import { validatePlugin } from '@ts-contract/plugins';
+
+const api = initContract(contract)
+  .use(validatePlugin)
+  .build();
+
+// Validate request data
+api.createUser.validateBody({ name: 'Alice', email: 'alice@example.com' });
+
+// Validate response data
+api.getUser.validateResponse(200, responseData);
+```
+
+Learn more: [Validate Plugin](/plugins/validate-plugin)
+
+## WebSocket Plugins
+
+WebSocket definitions use separate plugins via the `.useWebSocket()` method:
+
+```ts
+import { websocketPathPlugin, websocketValidatePlugin } from '@ts-contract/plugins';
+
+const contract = createContract({
+  chat: {
+    type: 'websocket',
+    path: '/ws/chat/:roomId',
+    pathParams: z.object({ roomId: z.string() }),
+    clientMessages: {
+      new_msg: z.object({
+        type: z.literal('new_msg'),
+        body: z.string(),
+      }),
+    },
+    serverMessages: {
+      new_msg: z.object({
+        type: z.literal('new_msg'),
+        id: z.string(),
+        body: z.string(),
+      }),
+    },
+  },
+});
+
+const api = initContract(contract)
+  .useWebSocket(websocketPathPlugin)
+  .useWebSocket(websocketValidatePlugin)
+  .build();
+
+// Build WebSocket URL
+api.chat.buildPath({ roomId: '123' });
+// => "/ws/chat/123"
+
+// Validate messages
+api.chat.validateClientMessage('new_msg', { type: 'new_msg', body: 'Hello!' });
+api.chat.validateServerMessage('new_msg', data);
+```
+
+### WebSocket Plugin Methods
+
+**websocketPathPlugin** adds:
+- `buildPath()` - Build WebSocket URLs with path parameters and query strings
+
+**websocketValidatePlugin** adds:
+- `validateClientMessage()` - Validate outgoing messages
+- `validateServerMessage()` - Validate incoming messages
+- `validatePathParams()` - Validate connection path parameters
+- `validateQuery()` - Validate connection query parameters
+- `validateHeaders()` - Validate connection headers
+
+Learn more: [WebSocket Plugins](/plugins/websocket-plugins)
+
+## Using Both Plugins Together
+
+Most applications use both plugins:
+
+```ts
+export const api = initContract(contract)
+  .use(pathPlugin)
+  .use(validatePlugin)
+  .build();
+
+// Client usage
+const url = api.getUser.buildPath({ id });
+const data = await fetch(url).then(r => r.json());
+return api.getUser.validateResponse(200, data);
+```
+
+
+## When to Use Plugins
+
+**Use plugins when:**
+- You want runtime utilities (path building, validation)
+- You need consistent behavior across all routes
+- You're building a client library or SDK
+
+**Skip plugins when:**
+- You only need type inference (no runtime utilities)
+- You want absolute minimal bundle size
+
+## Creating Custom Plugins
+
+You can create your own plugins to add custom functionality. See [Creating Custom Plugins](/plugins/creating-custom-plugins) for a detailed guide.
+
+## Next Steps
+
+- Explore [Path Plugin](/plugins/path-plugin) and [WebSocket Plugins](/plugins/websocket-plugins)
+- Learn about [Validate Plugin](/plugins/validate-plugin) for runtime validation
+- See [Creating Custom Plugins](/plugins/creating-custom-plugins) to build your own
+- Review [Best Practices](/guides/best-practices) for plugin usage patterns

@@ -1,0 +1,279 @@
+---
+title: Path Plugin
+description: Build type-safe URLs with path parameters and query strings using the pathPlugin.
+---
+
+## Overview
+
+The `pathPlugin` adds a `buildPath()` method to each route in your contract, enabling type-safe URL construction with path parameters and query strings.
+
+## Installation
+
+The path plugin is included in `@ts-contract/plugins`:
+
+```bash
+pnpm add @ts-contract/plugins
+```
+
+## Basic Usage
+
+Add the plugin to your contract using `initContract()`:
+
+```ts
+import { createContract, initContract } from '@ts-contract/core';
+import { pathPlugin } from '@ts-contract/plugins';
+import { z } from 'zod';
+
+const contract = createContract({
+  getUser: {
+    method: 'GET',
+    path: '/users/:id',
+    pathParams: z.object({ id: z.string() }),
+    responses: {
+      200: z.object({ id: z.string(), name: z.string() }),
+    },
+  },
+});
+
+const api = initContract(contract)
+  .use(pathPlugin)
+  .build();
+
+// Build a URL
+const url = api.getUser.buildPath({ id: '123' });
+// => "/users/123"
+```
+
+## The buildPath() Method
+
+The `buildPath()` method is added to every route and provides type-safe URL construction.
+
+### Method Signature
+
+```ts
+buildPath(params?, query?): string
+```
+
+- **params** - Path parameters (required if route has `pathParams`)
+- **query** - Query string parameters (optional if route has `query`)
+- **Returns** - Complete URL string with interpolated parameters
+
+### Type Safety
+
+TypeScript enforces the correct parameter types based on your route definition:
+
+```ts
+const contract = createContract({
+  getUser: {
+    method: 'GET',
+    path: '/users/:id',
+    pathParams: z.object({ id: z.string() }),
+    responses: {
+      200: z.object({ id: z.string(), name: z.string() }),
+    },
+  },
+});
+
+const api = initContract(contract).use(pathPlugin).build();
+
+// ✓ Valid
+api.getUser.buildPath({ id: '123' });
+
+// ✗ Error: Type 'number' is not assignable to type 'string'
+api.getUser.buildPath({ id: 123 });
+
+// ✗ Error: Property 'id' is missing
+api.getUser.buildPath({});
+```
+
+## Examples
+
+### Basic Usage
+
+```ts
+// Simple path (no parameters)
+api.listUsers.buildPath();
+// => "/users"
+
+// Single parameter
+api.getUser.buildPath({ id: '123' });
+// => "/users/123"
+
+// Multiple parameters
+api.getPost.buildPath({ userId: '123', postId: '456' });
+// => "/users/123/posts/456"
+```
+
+### Path with Query String
+
+```ts
+const contract = createContract({
+  listUsers: {
+    method: 'GET',
+    path: '/users',
+    query: z.object({
+      page: z.string().optional(),
+      limit: z.string().optional(),
+    }),
+    responses: {
+      200: z.array(z.object({ id: z.string() })),
+    },
+  },
+});
+
+const api = initContract(contract).use(pathPlugin).build();
+
+// No query parameters
+const url1 = api.listUsers.buildPath();
+// => "/users"
+
+// With query parameters
+const url2 = api.listUsers.buildPath(undefined, { page: '2', limit: '10' });
+// => "/users?page=2&limit=10"
+```
+
+### Path with Parameters and Query String
+
+```ts
+const contract = createContract({
+  getUserPosts: {
+    method: 'GET',
+    path: '/users/:userId/posts',
+    pathParams: z.object({ userId: z.string() }),
+    query: z.object({
+      status: z.enum(['draft', 'published']).optional(),
+      sort: z.string().optional(),
+    }),
+    responses: {
+      200: z.array(z.object({ id: z.string(), title: z.string() })),
+    },
+  },
+});
+
+const api = initContract(contract).use(pathPlugin).build();
+
+const url = api.getUserPosts.buildPath(
+  { userId: '123' },
+  { status: 'published', sort: 'date' }
+);
+// => "/users/123/posts?status=published&sort=date"
+```
+
+### Optional Query Parameters
+
+Query parameters with `undefined` or `null` values are automatically omitted:
+
+```ts
+const contract = createContract({
+  searchUsers: {
+    method: 'GET',
+    path: '/users/search',
+    query: z.object({
+      name: z.string().optional(),
+      email: z.string().optional(),
+      age: z.string().optional(),
+    }),
+    responses: {
+      200: z.array(z.object({ id: z.string() })),
+    },
+  },
+});
+
+const api = initContract(contract).use(pathPlugin).build();
+
+const url = api.searchUsers.buildPath(undefined, {
+  name: 'Alice',
+  email: undefined, // Omitted
+  age: null,        // Omitted
+});
+// => "/users/search?name=Alice"
+```
+
+## URL Encoding
+
+Path parameters and query values are automatically URL-encoded:
+
+```ts
+const contract = createContract({
+  getUser: {
+    method: 'GET',
+    path: '/users/:id',
+    pathParams: z.object({ id: z.string() }),
+    query: z.object({ search: z.string().optional() }),
+    responses: {
+      200: z.object({ id: z.string() }),
+    },
+  },
+});
+
+const api = initContract(contract).use(pathPlugin).build();
+
+const url = api.getUser.buildPath(
+  { id: 'user@example.com' },
+  { search: 'hello world' }
+);
+// => "/users/user%40example.com?search=hello+world"
+```
+
+## Common Use Cases
+
+```ts
+// Client-side fetch
+async function fetchUser(id: string) {
+  const url = api.getUser.buildPath({ id });
+  const response = await fetch(url);
+  return response.json();
+}
+
+// React Query integration
+function useUser(id: string) {
+  return useQuery({
+    queryKey: ['user', id],
+    queryFn: async () => {
+      const response = await fetch(api.getUser.buildPath({ id }));
+      return response.json();
+    },
+  });
+}
+```
+
+
+## Error Handling
+
+### Missing Required Parameters
+
+If you forget a required parameter, you'll get a runtime error:
+
+```ts
+const contract = createContract({
+  getPost: {
+    method: 'GET',
+    path: '/users/:userId/posts/:postId',
+    pathParams: z.object({
+      userId: z.string(),
+      postId: z.string(),
+    }),
+    responses: {
+      200: z.object({ id: z.string() }),
+    },
+  },
+});
+
+const api = initContract(contract).use(pathPlugin).build();
+
+// Runtime error: Missing path parameter: postId
+api.getPost.buildPath({ userId: '123' } as any);
+```
+
+TypeScript will catch this at compile time if you don't use `as any`.
+
+## Performance
+
+Minimal overhead: ~500 bytes minified + gzipped. Safe for performance-critical applications.
+
+## Next Steps
+
+- Learn about [Validate Plugin](/plugins/validate-plugin) for runtime validation
+- See [Creating Custom Plugins](/plugins/creating-custom-plugins) to build your own
+- Explore [Recipes](/recipes/client/react-query) for real-world usage examples
+- Review [Plugin System](/core-concepts/plugin-system) for how plugins work

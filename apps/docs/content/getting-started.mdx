@@ -317,3 +317,227 @@ function UserProfile({ id }: { id: string }) {
   );
 }
 ```
+
+## Common Patterns
+
+### Creating a Complete CRUD API
+
+Here's a typical pattern for a resource with full CRUD operations:
+
+```ts
+import { createContract } from '@ts-contract/core';
+import { z } from 'zod';
+
+const UserSchema = z.object({
+  id: z.string(),
+  name: z.string(),
+  email: z.string().email(),
+});
+
+const contract = createContract({
+  users: {
+    list: {
+      method: 'GET',
+      path: '/users',
+      query: z.object({
+        page: z.string().optional(),
+        limit: z.string().optional(),
+      }),
+      responses: {
+        200: z.object({
+          data: z.array(UserSchema),
+          total: z.number(),
+        }),
+      },
+    },
+    get: {
+      method: 'GET',
+      path: '/users/:id',
+      pathParams: z.object({ id: z.string() }),
+      responses: {
+        200: UserSchema,
+        404: z.object({ message: z.string() }),
+      },
+    },
+    create: {
+      method: 'POST',
+      path: '/users',
+      body: UserSchema.omit({ id: true }),
+      responses: {
+        201: UserSchema,
+        400: z.object({ message: z.string() }),
+      },
+    },
+    update: {
+      method: 'PUT',
+      path: '/users/:id',
+      pathParams: z.object({ id: z.string() }),
+      body: UserSchema.omit({ id: true }),
+      responses: {
+        200: UserSchema,
+        404: z.object({ message: z.string() }),
+      },
+    },
+    delete: {
+      method: 'DELETE',
+      path: '/users/:id',
+      pathParams: z.object({ id: z.string() }),
+      responses: {
+        204: z.null(),
+        404: z.object({ message: z.string() }),
+      },
+    },
+  },
+});
+```
+
+### Sharing Schemas Across Routes
+
+Extract common schemas to avoid duplication:
+
+```ts
+import { z } from 'zod';
+
+const ErrorSchema = z.object({ message: z.string() });
+const PaginationSchema = z.object({
+  page: z.string().optional(),
+  limit: z.string().optional(),
+});
+
+const contract = createContract({
+  getUsers: {
+    method: 'GET',
+    path: '/users',
+    query: PaginationSchema,
+    responses: {
+      200: z.array(z.object({ id: z.string(), name: z.string() })),
+      500: ErrorSchema,
+    },
+  },
+  getPosts: {
+    method: 'GET',
+    path: '/posts',
+    query: PaginationSchema,
+    responses: {
+      200: z.array(z.object({ id: z.string(), title: z.string() })),
+      500: ErrorSchema,
+    },
+  },
+});
+```
+
+### Organizing Large APIs
+
+Split your contract into multiple files for better organization:
+
+```ts
+// contracts/users.ts
+export const userRoutes = {
+  getUser: { /* ... */ },
+  createUser: { /* ... */ },
+};
+
+// contracts/posts.ts
+export const postRoutes = {
+  getPost: { /* ... */ },
+  createPost: { /* ... */ },
+};
+
+// contracts/index.ts
+import { createContract } from '@ts-contract/core';
+import { userRoutes } from './users';
+import { postRoutes } from './posts';
+
+export const contract = createContract({
+  users: userRoutes,
+  posts: postRoutes,
+});
+```
+
+## Troubleshooting
+
+### TypeScript Errors with Type Inference
+
+**Problem:** TypeScript can't infer types from your contract.
+
+**Solution:** Make sure you're using `typeof` when extracting types:
+
+```ts
+// ✓ Correct
+type User = InferResponseBody<typeof contract.getUser, 200>;
+
+// ✗ Wrong
+type User = InferResponseBody<contract.getUser, 200>;
+```
+
+### Schema Validation Errors
+
+**Problem:** Validation fails with unexpected errors.
+
+**Solution:** Ensure your schema library is compatible with Standard Schema. ts-contract works with Zod, Valibot, Arktype, and any library implementing [@standard-schema/spec](https://github.com/standard-schema/standard-schema).
+
+### Plugin Methods Not Available
+
+**Problem:** `buildPath()` or `validateResponse()` methods don't exist.
+
+**Solution:** Make sure you've initialized the contract with plugins:
+
+```ts
+// ✓ Correct - plugins added
+const api = initContract(contract)
+  .use(pathPlugin)
+  .use(validatePlugin)
+  .build();
+
+// ✗ Wrong - no plugins
+const api = contract;
+```
+
+### Path Parameters Not Matching
+
+**Problem:** Path building fails with missing parameter errors.
+
+**Solution:** Ensure parameter names in `pathParams` match the placeholders in `path`:
+
+```ts
+// ✓ Correct - names match
+{
+  path: '/users/:userId/posts/:postId',
+  pathParams: z.object({
+    userId: z.string(),
+    postId: z.string(),
+  }),
+}
+
+// ✗ Wrong - names don't match
+{
+  path: '/users/:userId/posts/:postId',
+  pathParams: z.object({
+    id: z.string(),
+    post: z.string(),
+  }),
+}
+```
+
+## What's Next?
+
+Now that you've got the basics, dive deeper into ts-contract:
+
+### Core Concepts
+
+- **[Contracts](/core-concepts/contracts)** - Learn how to organize and compose contracts
+- **[Routes & Schemas](/core-concepts/routes-and-schemas)** - Deep dive into route definitions
+- **[Type Inference](/core-concepts/type-inference)** - Master type extraction from contracts
+- **[Plugin System](/core-concepts/plugin-system)** - Understand how plugins extend functionality
+
+### Plugins
+
+- **[Path Plugin](/plugins/path-plugin)** - Build type-safe URLs
+- **[Validate Plugin](/plugins/validate-plugin)** - Runtime schema validation
+- **[Creating Custom Plugins](/plugins/creating-custom-plugins)** - Build your own plugins
+
+### Recipes
+
+- **[Server Integrations](/recipes/server/hono)** - Integrate with Hono, Express, Fastify
+- **[Client Integrations](/recipes/client/react-query)** - Use with React Query, SWR, and more
+- **[Full-Stack Examples](/recipes/full-stack/monorepo)** - Complete end-to-end examples

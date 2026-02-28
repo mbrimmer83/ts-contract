@@ -1,0 +1,212 @@
+---
+title: Contracts
+description: Understanding contracts in ts-contract and how to define type-safe API specifications.
+---
+
+## What is a Contract?
+
+A **contract** in ts-contract is a type-safe specification of your HTTP API. It defines the shape of your routes, including paths, methods, parameters, request bodies, and responses. Contracts serve as the single source of truth shared between your server and client code.
+
+Unlike traditional API specifications (like OpenAPI), ts-contract contracts are written in TypeScript and provide first-class type inference throughout your application.
+
+## Creating a Basic Contract
+
+Use `createContract()` to define your API contract:
+
+```ts
+import { createContract } from '@ts-contract/core';
+import { z } from 'zod';
+
+const contract = createContract({
+  getUser: {
+    method: 'GET',
+    path: '/users/:id',
+    pathParams: z.object({ id: z.string() }),
+    responses: {
+      200: z.object({ id: z.string(), name: z.string() }),
+      404: z.object({ message: z.string() }),
+    },
+  },
+});
+```
+
+## Understanding ContractDef
+
+The `createContract()` function accepts a `ContractDef` - an object where each key is either:
+
+1. **A route definition** (`RouteDef`) - defines a single HTTP endpoint
+2. **A WebSocket definition** (`WebSocketDef`) - defines a WebSocket connection
+3. **A nested contract** (`ContractDef`) - groups related definitions together
+
+This flexibility allows you to organize your API in a way that makes sense for your application.
+
+## Definition Types
+
+### HTTP Route Definition
+
+A route definition describes a single HTTP endpoint:
+
+```ts
+const contract = createContract({
+  getUser: {
+    method: 'GET',
+    path: '/users/:id',
+    pathParams: z.object({ id: z.string() }),
+    responses: {
+      200: z.object({ id: z.string(), name: z.string() }),
+    },
+  },
+});
+```
+
+### WebSocket Definition
+
+A WebSocket definition describes a WebSocket connection with bidirectional messages:
+
+```ts
+const contract = createContract({
+  chat: {
+    type: 'websocket',
+    path: '/ws/chat/:roomId',
+    pathParams: z.object({ roomId: z.string() }),
+    clientMessages: {
+      new_msg: z.object({
+        type: z.literal('new_msg'),
+        body: z.string(),
+      }),
+    },
+    serverMessages: {
+      new_msg: z.object({
+        type: z.literal('new_msg'),
+        id: z.string(),
+        body: z.string(),
+      }),
+    },
+  },
+});
+```
+
+[Learn more about WebSocket contracts →](/core-concepts/websocket-contracts)
+
+### Nested Contracts
+
+Nest contracts to organize related routes:
+
+```ts
+const contract = createContract({
+  users: {
+    getUser: {
+      method: 'GET',
+      path: '/users/:id',
+      pathParams: z.object({ id: z.string() }),
+      responses: {
+        200: z.object({ id: z.string(), name: z.string() }),
+      },
+    },
+    listUsers: {
+      method: 'GET',
+      path: '/users',
+      query: z.object({ page: z.string().optional() }),
+      responses: {
+        200: z.array(z.object({ id: z.string(), name: z.string() })),
+      },
+    },
+  },
+  posts: {
+    getPost: {
+      method: 'GET',
+      path: '/posts/:id',
+      pathParams: z.object({ id: z.string() }),
+      responses: {
+        200: z.object({ id: z.string(), title: z.string() }),
+      },
+    },
+  },
+});
+```
+
+Access nested routes using dot notation:
+
+```ts
+// After building with plugins
+api.users.getUser.buildPath({ id: '123' });
+api.posts.getPost.buildPath({ id: '456' });
+```
+
+## Composing Contracts
+
+Compose multiple contracts for better organization:
+
+```ts
+const userContract = createContract({
+  getUser: { method: 'GET', path: '/users/:id', /* ... */ },
+  createUser: { method: 'POST', path: '/users', /* ... */ },
+});
+
+const postContract = createContract({
+  getPost: { method: 'GET', path: '/posts/:id', /* ... */ },
+  createPost: { method: 'POST', path: '/posts', /* ... */ },
+});
+
+const apiContract = createContract({
+  users: userContract,
+  posts: postContract,
+});
+```
+
+This allows you to keep related routes together in separate files and maintain clean separation of concerns.
+
+## Best Practices for Contract Organization
+
+### Share Common Schemas
+
+Extract reusable schemas to avoid duplication:
+
+```ts
+const UserSchema = z.object({ id: z.string(), name: z.string() });
+const ErrorSchema = z.object({ message: z.string() });
+
+const contract = createContract({
+  getUser: {
+    method: 'GET',
+    path: '/users/:id',
+    responses: { 200: UserSchema, 404: ErrorSchema },
+  },
+});
+```
+
+### Split Large APIs
+
+Organize contracts by resource and compose them:
+
+```ts
+const userContract = createContract({ /* user routes */ });
+const postContract = createContract({ /* post routes */ });
+
+const apiContract = createContract({
+  users: userContract,
+  posts: postContract,
+});
+```
+
+## Mixed HTTP and WebSocket Contracts
+
+Combine HTTP routes and WebSocket definitions in the same contract:
+
+```ts
+const contract = createContract({
+  http: {
+    getUser: { method: 'GET', path: '/users/:id', /* ... */ },
+  },
+  ws: {
+    chat: { type: 'websocket', path: '/ws/chat', /* ... */ },
+  },
+});
+```
+
+## Next Steps
+
+- Learn about [HTTP Routes & Schemas](/core-concepts/routes-and-schemas) for HTTP endpoint details
+- Explore [WebSocket Contracts](/core-concepts/websocket-contracts) for real-time communication
+- See [Type Inference](/core-concepts/type-inference) to extract types from your contracts
+- Understand the [Plugin System](/core-concepts/plugin-system) to add functionality

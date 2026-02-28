@@ -1,0 +1,354 @@
+---
+title: pathPlugin API
+description: Complete API reference for the pathPlugin.
+---
+
+## Overview
+
+The `pathPlugin` is a built-in plugin that adds the `buildPath()` method to each route for type-safe URL construction.
+
+## Import
+
+```ts
+import { pathPlugin } from '@ts-contract/plugins';
+```
+
+## Plugin Object
+
+```ts
+const pathPlugin: ContractPlugin<'path'>
+```
+
+### Properties
+
+- **name**: `'path'`
+- **route**: Function that adds `buildPath()` method to routes
+
+## Usage
+
+```ts
+import { initContract } from '@ts-contract/core';
+import { pathPlugin } from '@ts-contract/plugins';
+import { contract } from './contract';
+
+const api = initContract(contract)
+  .use(pathPlugin)
+  .build();
+```
+
+## Added Methods
+
+### buildPath()
+
+Builds a URL string with interpolated path parameters and query string.
+
+#### Signature
+
+```ts
+buildPath(...args: BuildPathArgs<Route>): string
+```
+
+The exact signature depends on the route definition:
+
+**No parameters:**
+```ts
+buildPath(): string
+```
+
+**Only path parameters:**
+```ts
+buildPath(params: PathParams): string
+```
+
+**Only query parameters:**
+```ts
+buildPath(params?: undefined, query?: Query): string
+```
+
+**Both path and query parameters:**
+```ts
+buildPath(params: PathParams, query?: Query): string
+```
+
+#### Parameters
+
+- **params** - Object with path parameter values (required if route has `pathParams`)
+- **query** - Object with query parameter values (optional if route has `query`)
+
+#### Returns
+
+- Complete URL string with interpolated parameters
+
+#### Examples
+
+**No parameters:**
+
+```ts
+const contract = createContract({
+  listUsers: {
+    method: 'GET',
+    path: '/users',
+    responses: {
+      200: z.array(z.object({ id: z.string() })),
+    },
+  },
+});
+
+const api = initContract(contract).use(pathPlugin).build();
+
+api.listUsers.buildPath();
+// => "/users"
+```
+
+**Path parameters:**
+
+```ts
+const contract = createContract({
+  getUser: {
+    method: 'GET',
+    path: '/users/:id',
+    pathParams: z.object({ id: z.string() }),
+    responses: {
+      200: z.object({ id: z.string() }),
+    },
+  },
+});
+
+const api = initContract(contract).use(pathPlugin).build();
+
+api.getUser.buildPath({ id: '123' });
+// => "/users/123"
+```
+
+**Multiple path parameters:**
+
+```ts
+const contract = createContract({
+  getPost: {
+    method: 'GET',
+    path: '/users/:userId/posts/:postId',
+    pathParams: z.object({
+      userId: z.string(),
+      postId: z.string(),
+    }),
+    responses: {
+      200: z.object({ id: z.string() }),
+    },
+  },
+});
+
+const api = initContract(contract).use(pathPlugin).build();
+
+api.getPost.buildPath({ userId: '123', postId: '456' });
+// => "/users/123/posts/456"
+```
+
+**Query parameters:**
+
+```ts
+const contract = createContract({
+  listUsers: {
+    method: 'GET',
+    path: '/users',
+    query: z.object({
+      page: z.string().optional(),
+      limit: z.string().optional(),
+    }),
+    responses: {
+      200: z.array(z.object({ id: z.string() })),
+    },
+  },
+});
+
+const api = initContract(contract).use(pathPlugin).build();
+
+api.listUsers.buildPath(undefined, { page: '2', limit: '10' });
+// => "/users?page=2&limit=10"
+```
+
+**Path and query parameters:**
+
+```ts
+const contract = createContract({
+  getUserPosts: {
+    method: 'GET',
+    path: '/users/:userId/posts',
+    pathParams: z.object({ userId: z.string() }),
+    query: z.object({
+      status: z.string().optional(),
+    }),
+    responses: {
+      200: z.array(z.object({ id: z.string() })),
+    },
+  },
+});
+
+const api = initContract(contract).use(pathPlugin).build();
+
+api.getUserPosts.buildPath({ userId: '123' }, { status: 'published' });
+// => "/users/123/posts?status=published"
+```
+
+## Type Safety
+
+The `buildPath()` method is fully type-safe based on your route definition:
+
+```ts
+const contract = createContract({
+  getUser: {
+    method: 'GET',
+    path: '/users/:id',
+    pathParams: z.object({ id: z.string() }),
+    responses: {
+      200: z.object({ id: z.string() }),
+    },
+  },
+});
+
+const api = initContract(contract).use(pathPlugin).build();
+
+// ✓ Valid
+api.getUser.buildPath({ id: '123' });
+
+// ✗ Error: Type 'number' is not assignable to type 'string'
+api.getUser.buildPath({ id: 123 });
+
+// ✗ Error: Property 'id' is missing
+api.getUser.buildPath({});
+
+// ✗ Error: Expected 1 arguments, but got 0
+api.getUser.buildPath();
+```
+
+## Behavior
+
+### URL Encoding
+
+Path parameters and query values are automatically URL-encoded:
+
+```ts
+api.getUser.buildPath({ id: 'user@example.com' });
+// => "/users/user%40example.com"
+
+api.searchUsers.buildPath(undefined, { query: 'hello world' });
+// => "/users/search?query=hello+world"
+```
+
+### Optional Query Parameters
+
+Query parameters with `undefined` or `null` values are omitted:
+
+```ts
+const contract = createContract({
+  searchUsers: {
+    method: 'GET',
+    path: '/users/search',
+    query: z.object({
+      name: z.string().optional(),
+      email: z.string().optional(),
+    }),
+    responses: {
+      200: z.array(z.object({ id: z.string() })),
+    },
+  },
+});
+
+const api = initContract(contract).use(pathPlugin).build();
+
+api.searchUsers.buildPath(undefined, {
+  name: 'Alice',
+  email: undefined, // Omitted
+});
+// => "/users/search?name=Alice"
+```
+
+### Empty Query String
+
+If all query parameters are `undefined` or `null`, no query string is added:
+
+```ts
+api.searchUsers.buildPath(undefined, {
+  name: undefined,
+  email: undefined,
+});
+// => "/users/search"
+```
+
+## Error Handling
+
+### Missing Required Path Parameter
+
+If a required path parameter is missing, a runtime error is thrown:
+
+```ts
+const contract = createContract({
+  getPost: {
+    method: 'GET',
+    path: '/users/:userId/posts/:postId',
+    pathParams: z.object({
+      userId: z.string(),
+      postId: z.string(),
+    }),
+    responses: {
+      200: z.object({ id: z.string() }),
+    },
+  },
+});
+
+const api = initContract(contract).use(pathPlugin).build();
+
+// Throws: Error: Missing path parameter: postId
+api.getPost.buildPath({ userId: '123' } as any);
+```
+
+TypeScript will catch this at compile time unless you use type assertions.
+
+## Performance
+
+- **Bundle size**: ~500 bytes minified + gzipped
+- **Runtime**: Simple string interpolation and URLSearchParams
+- **Memory**: No state or caching
+
+The plugin has minimal performance impact.
+
+## Type Registry
+
+The plugin registers its types using declaration merging:
+
+```ts
+declare module '@ts-contract/core' {
+  interface PluginTypeRegistry<R> {
+    path: {
+      buildPath: R extends RouteDef
+        ? (...args: BuildPathArgs<R>) => string
+        : never;
+    };
+  }
+}
+```
+
+This enables full type safety for the `buildPath()` method.
+
+## Related Types
+
+### BuildPathArgs
+
+Internal type that determines the `buildPath()` signature based on the route:
+
+```ts
+type BuildPathArgs<R extends RouteDef> =
+  InferPathParams<R> extends undefined
+    ? InferQuery<R> extends undefined
+      ? []
+      : [params?: undefined, query?: InferQuery<R>]
+    : InferQuery<R> extends undefined
+      ? [params: InferPathParams<R>]
+      : [params: InferPathParams<R>, query?: InferQuery<R>];
+```
+
+## See Also
+
+- [Path Plugin Guide](/plugins/path-plugin) - Detailed guide with examples
+- [validatePlugin](/api-reference/plugins/validate-plugin) - Runtime validation plugin
+- [initContract](/api-reference/core/init-contract) - Initialize contracts with plugins
+- [Creating Custom Plugins](/plugins/creating-custom-plugins) - Build your own plugins

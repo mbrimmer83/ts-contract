@@ -54,6 +54,61 @@ const user = api.getUser.validateResponse(200, data);
 // => { id: string, name: string, email: string }
 ```
 
+### WebSocket Example
+
+```ts
+import { createContract, initContract } from '@ts-contract/core';
+import {
+  websocketPathPlugin,
+  websocketValidatePlugin,
+} from '@ts-contract/plugins';
+import { z } from 'zod';
+
+const contract = createContract({
+  chat: {
+    type: 'websocket',
+    path: '/ws/chat/:roomId',
+    pathParams: z.object({ roomId: z.string() }),
+    query: z.object({ token: z.string() }),
+    clientMessages: {
+      new_msg: z.object({
+        type: z.literal('new_msg'),
+        body: z.string(),
+      }),
+    },
+    serverMessages: {
+      new_msg: z.object({
+        type: z.literal('new_msg'),
+        id: z.string(),
+        body: z.string(),
+        userId: z.string(),
+      }),
+    },
+  },
+});
+
+const api = initContract(contract)
+  .useWebSocket(websocketPathPlugin)
+  .useWebSocket(websocketValidatePlugin)
+  .build();
+
+// Build WebSocket URL
+const url = api.chat.buildPath({ roomId: '123' }, { token: 'abc' });
+// => "/ws/chat/123?token=abc"
+
+// Validate outgoing message
+const msg = api.chat.validateClientMessage('new_msg', {
+  type: 'new_msg',
+  body: 'Hello!',
+});
+
+// Validate incoming message (e.g., with Phoenix.js)
+channel.on('new_msg', (data) => {
+  const validated = api.chat.validateServerMessage('new_msg', data);
+  console.log(validated.body);
+});
+```
+
 ## Packages
 
 | Package                | Description                                                     |

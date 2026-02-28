@@ -1,0 +1,206 @@
+---
+title: WebSocket Contracts
+description: Define type-safe WebSocket APIs with bidirectional message schemas
+---
+
+# WebSocket Contracts
+
+WebSocket contracts allow you to define type-safe WebSocket APIs with full TypeScript inference for bidirectional messages, connection parameters, and event types.
+
+## Overview
+
+Unlike HTTP routes which follow a request-response pattern, WebSocket connections are:
+
+- **Bidirectional**: Both client→server and server→client messages
+- **Event-based**: Multiple message types per connection
+- **Stateful**: Long-lived connections with lifecycle events
+
+ts-contract models WebSocket connections with separate schemas for client and server messages, while letting external frameworks (Phoenix.js, Socket.io, etc.) handle connection lifecycle.
+
+## Basic WebSocket Definition
+
+A WebSocket definition includes:
+
+- **type**: Must be `'websocket'` (discriminator)
+- **path**: Connection endpoint (supports path parameters)
+- **pathParams**: Optional path parameter schema
+- **query**: Optional query parameter schema
+- **headers**: Optional header schemas
+- **clientMessages**: Client→Server message schemas (keyed by event name)
+- **serverMessages**: Server→Client message schemas (keyed by event name)
+
+```typescript
+import { createContract } from '@ts-contract/core';
+import { z } from 'zod';
+
+const contract = createContract({
+  chat: {
+    type: 'websocket',
+    path: '/ws/chat/:roomId',
+    pathParams: z.object({ roomId: z.string() }),
+    query: z.object({ token: z.string() }),
+    clientMessages: {
+      new_msg: z.object({
+        type: z.literal('new_msg'),
+        body: z.string(),
+      }),
+      typing: z.object({
+        type: z.literal('typing'),
+        isTyping: z.boolean(),
+      }),
+    },
+    serverMessages: {
+      new_msg: z.object({
+        type: z.literal('new_msg'),
+        id: z.string(),
+        body: z.string(),
+        userId: z.string(),
+      }),
+      user_typing: z.object({
+        type: z.literal('user_typing'),
+        userId: z.string(),
+        isTyping: z.boolean(),
+      }),
+    },
+  },
+});
+```
+
+## Message Type Discriminators
+
+**Important**: Message schemas must include a type discriminator field that matches the event name. This ensures type safety and runtime validation.
+
+```typescript
+clientMessages: {
+  // Event name: 'new_msg'
+  new_msg: z.object({
+    type: z.literal('new_msg'), // Must match event name
+    body: z.string(),
+  }),
+}
+```
+
+This pattern works seamlessly with frameworks like Phoenix.js that use event-based messaging.
+
+## Mixed HTTP and WebSocket Contracts
+
+You can combine HTTP routes and WebSocket definitions in the same contract:
+
+```typescript
+const contract = createContract({
+  http: {
+    getUser: {
+      method: 'GET',
+      path: '/users/:id',
+      pathParams: z.object({ id: z.string() }),
+      responses: {
+        200: z.object({ name: z.string() }),
+      },
+    },
+  },
+  ws: {
+    chat: {
+      type: 'websocket',
+      path: '/ws/chat/:roomId',
+      pathParams: z.object({ roomId: z.string() }),
+      clientMessages: {
+        new_msg: z.object({
+          type: z.literal('new_msg'),
+          body: z.string(),
+        }),
+      },
+      serverMessages: {
+        new_msg: z.object({
+          type: z.literal('new_msg'),
+          id: z.string(),
+          body: z.string(),
+        }),
+      },
+    },
+  },
+});
+```
+
+## Using WebSocket Plugins
+
+WebSocket definitions work with dedicated plugins:
+
+```typescript
+import { initContract } from '@ts-contract/core';
+import { websocketPathPlugin, websocketValidatePlugin } from '@ts-contract/plugins';
+
+const api = initContract(contract)
+  .useWebSocket(websocketPathPlugin)
+  .useWebSocket(websocketValidatePlugin)
+  .build();
+
+// Build WebSocket URL
+const url = api.chat.buildPath({ roomId: '123' }, { token: 'abc' });
+// => "/ws/chat/123?token=abc"
+
+// Validate outgoing message
+const msg = api.chat.validateClientMessage('new_msg', {
+  type: 'new_msg',
+  body: 'Hello!',
+});
+
+// Validate incoming message
+const serverMsg = api.chat.validateServerMessage('new_msg', data);
+```
+
+## Type Inference
+
+Full TypeScript inference is available for all message types:
+
+```typescript
+import type {
+  InferClientMessage,
+  InferServerMessage,
+  InferWebSocketPathParams,
+  InferWebSocketQuery,
+} from '@ts-contract/core';
+
+// Infer specific message types
+type NewMsgClient = InferClientMessage<typeof contract.chat, 'new_msg'>;
+// => { type: 'new_msg', body: string }
+
+type NewMsgServer = InferServerMessage<typeof contract.chat, 'new_msg'>;
+// => { type: 'new_msg', id: string, body: string, userId: string }
+
+// Infer connection parameters
+type PathParams = InferWebSocketPathParams<typeof contract.chat>;
+// => { roomId: string }
+
+type Query = InferWebSocketQuery<typeof contract.chat>;
+// => { token: string }
+```
+
+## Framework Integration
+
+WebSocket contracts are designed to work with any WebSocket framework. The contract defines the message schemas and connection parameters, while your chosen framework handles the actual WebSocket connection lifecycle (open, close, error events).
+
+See the [Phoenix.js integration recipe](/recipes/websocket/phoenix-chat) for a complete example.
+
+## Connection Lifecycle
+
+ts-contract does **not** model connection lifecycle events (open, close, error). These are handled by your WebSocket framework:
+
+- **Phoenix.js**: `socket.onError()`, `socket.onClose()`, `channel.onClose()`
+- **Socket.io**: `socket.on('connect')`, `socket.on('disconnect')`
+- **Native WebSocket**: `ws.onopen`, `ws.onclose`, `ws.onerror`
+
+The contract focuses on message validation and type safety, not connection management.
+
+## Best Practices
+
+1. **Always include type discriminators** in message schemas
+2. **Group related WebSocket definitions** under a common namespace (e.g., `ws.chat`, `ws.notifications`)
+3. **Use descriptive event names** that match your backend implementation
+4. **Validate both directions** - client messages before sending, server messages on receipt
+5. **Keep message schemas focused** - one message type per event
+
+## Next Steps
+
+- Learn about [WebSocket plugins](/plugins/websocket-plugins)
+- See a [Phoenix.js integration example](/recipes/websocket/phoenix-chat)
+- Explore [type inference utilities](/api-reference/core/websocket-inference)

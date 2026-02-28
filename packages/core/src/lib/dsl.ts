@@ -1,6 +1,7 @@
 /* eslint-disable @typescript-eslint/no-explicit-any */
 import type { Method, HttpStatusCodes } from './http-types';
 import type { SchemaProtocol } from './schema-types';
+import type { WebSocketDef } from './websocket-types';
 
 /**
  * Route definition
@@ -18,17 +19,25 @@ export type RouteDef = {
 };
 
 /**
- * Contract definition - maps route names to route definitions or nested contracts
+ * Contract definition - maps route names to route definitions, WebSocket definitions, or nested contracts
  */
 export interface ContractDef {
-  [key: string]: RouteDef | ContractDef;
+  [key: string]: RouteDef | WebSocketDef | ContractDef;
 }
 
 /**
  * Type guard to check if a value is a RouteDef (has method and path)
  */
-export const isRouteDef = (value: RouteDef | ContractDef): value is RouteDef =>
-  'method' in value && 'path' in value;
+export const isRouteDef = (
+  value: RouteDef | WebSocketDef | ContractDef,
+): value is RouteDef => 'method' in value && 'path' in value;
+
+/**
+ * Type guard to check if a value is a WebSocketDef (has type === 'websocket')
+ */
+export const isWebSocketDef = (
+  value: RouteDef | WebSocketDef | ContractDef,
+): value is WebSocketDef => 'type' in value && value.type === 'websocket';
 
 /**
  * Creates a new contract

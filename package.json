@@ -6,7 +6,7 @@
   "license": "MIT",
   "private": true,
   "scripts": {
-    "build": "pnpm -r run build",
+    "build": "pnpm --filter './packages/*' run build && pnpm --filter './recipes/*' --filter './apps/*' run build",
     "test": "pnpm -r run test",
     "lint": "pnpm -r run lint",
     "typecheck": "tsc -b",
