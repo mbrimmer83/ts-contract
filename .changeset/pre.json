@@ -4,9 +4,17 @@
   "initialVersions": {
     "@ts-contract/docs": "0.0.0",
     "@ts-contract/core": "0.0.1",
-    "@ts-contract/plugins": "0.0.1"
+    "@ts-contract/plugins": "0.0.1",
+    "@ts-contract-recipes/custom-plugins": "1.0.0",
+    "@ts-contract-recipes/express": "1.0.0",
+    "@ts-contract-recipes/fastify-react-query": "1.0.0",
+    "@ts-contract-recipes/client": "1.0.0",
+    "@ts-contract-recipes/server": "1.0.0",
+    "@ts-contract-recipes/shared": "1.0.0",
+    "@ts-contract-recipes/hono-custom-fetch": "1.0.0"
   },
   "changesets": [
+    "sparkly-pianos-brake",
     "upset-eyes-brush"
   ]
 }

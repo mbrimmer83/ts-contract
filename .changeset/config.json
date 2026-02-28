@@ -7,5 +7,14 @@
   "access": "public",
   "baseBranch": "main",
   "updateInternalDependencies": "patch",
-  "ignore": ["@ts-contract/docs"]
+  "ignore": [
+    "@ts-contract/docs",
+    "@ts-contract-recipes/client",
+    "@ts-contract-recipes/server",
+    "@ts-contract-recipes/shared",
+    "@ts-contract-recipes/fastify-react-query",
+    "@ts-contract-recipes/hono-custom-fetch",
+    "@ts-contract-recipes/custom-plugins",
+    "@ts-contract-recipes/express"
+  ]
 }
