@@ -8,7 +8,7 @@
     "build": "tsc",
     "start": "node dist/index.js",
     "type-check": "tsc --noEmit",
-    "test": "node --test src/lib/api-client.test.ts"
+    "test": "tsx --test src/lib/api-client.test.ts"
   },
   "dependencies": {
     "@ts-contract/core": "workspace:*",
