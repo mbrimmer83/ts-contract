@@ -4,3 +4,5 @@ export * from './lib/http-types';
 export * from './lib/schema-types';
 export * from './lib/plugin-types';
 export * from './lib/contract-builder';
+export * from './lib/websocket-types';
+export * from './lib/websocket-inference-utils';

@@ -1,11 +1,15 @@
 ---
-title: Routes & Schemas
-description: Deep dive into route definitions and schema integration in ts-contract.
+title: HTTP Routes & Schemas
+description: Deep dive into HTTP route definitions and schema integration in ts-contract.
 ---
 
-## Route Definition Anatomy
+## HTTP Route Definition Anatomy
 
-A route definition (`RouteDef`) describes a single HTTP endpoint with all its inputs and outputs. Here's a fully annotated example:
+A route definition (`RouteDef`) describes a single HTTP endpoint with all its inputs and outputs.
+
+> **WebSocket Contracts**: For WebSocket connections, see [WebSocket Contracts](/core-concepts/websocket-contracts) which use a different structure with bidirectional message schemas.
+
+Here's a fully annotated example:
 
 ```ts
 import { createContract } from '@ts-contract/core';
@@ -202,7 +206,7 @@ ts-contract uses the [@standard-schema/spec](https://github.com/standard-schema/
 
 ### Supported Libraries
 
-#### Zod
+ts-contract works with Zod, Valibot, Arktype, and any Standard Schema compliant library:
 
 ```ts
 import { z } from 'zod';
@@ -217,51 +221,6 @@ const contract = createContract({
         id: z.string().uuid(),
         name: z.string().min(1),
         email: z.string().email(),
-        createdAt: z.string().datetime(),
-      }),
-    },
-  },
-});
-```
-
-#### Valibot
-
-```ts
-import * as v from 'valibot';
-
-const contract = createContract({
-  getUser: {
-    method: 'GET',
-    path: '/users/:id',
-    pathParams: v.object({ id: v.pipe(v.string(), v.uuid()) }),
-    responses: {
-      200: v.object({
-        id: v.pipe(v.string(), v.uuid()),
-        name: v.pipe(v.string(), v.minLength(1)),
-        email: v.pipe(v.string(), v.email()),
-        createdAt: v.pipe(v.string(), v.isoDateTime()),
-      }),
-    },
-  },
-});
-```
-
-#### Arktype
-
-```ts
-import { type } from 'arktype';
-
-const contract = createContract({
-  getUser: {
-    method: 'GET',
-    path: '/users/:id',
-    pathParams: type({ id: 'string' }),
-    responses: {
-      200: type({
-        id: 'string',
-        name: 'string',
-        email: 'string.email',
-        createdAt: 'string',
       }),
     },
   },
@@ -375,6 +334,7 @@ Define multiple response schemas for different status codes:
 
 ## Next Steps
 
+- Explore [WebSocket Contracts](/core-concepts/websocket-contracts) for real-time communication
 - Learn about [Type Inference](/core-concepts/type-inference) to extract types from your routes
 - Understand the [Plugin System](/core-concepts/plugin-system) to add functionality
 - See [Contracts](/core-concepts/contracts) for organizing multiple routes

@@ -88,65 +88,19 @@ api.getUser.buildPath({});
 
 ## Examples
 
-### Simple Path (No Parameters)
+### Basic Usage
 
 ```ts
-const contract = createContract({
-  listUsers: {
-    method: 'GET',
-    path: '/users',
-    responses: {
-      200: z.array(z.object({ id: z.string() })),
-    },
-  },
-});
-
-const api = initContract(contract).use(pathPlugin).build();
-
-const url = api.listUsers.buildPath();
+// Simple path (no parameters)
+api.listUsers.buildPath();
 // => "/users"
-```
 
-### Path with Single Parameter
-
-```ts
-const contract = createContract({
-  getUser: {
-    method: 'GET',
-    path: '/users/:id',
-    pathParams: z.object({ id: z.string() }),
-    responses: {
-      200: z.object({ id: z.string(), name: z.string() }),
-    },
-  },
-});
-
-const api = initContract(contract).use(pathPlugin).build();
-
-const url = api.getUser.buildPath({ id: '123' });
+// Single parameter
+api.getUser.buildPath({ id: '123' });
 // => "/users/123"
-```
 
-### Path with Multiple Parameters
-
-```ts
-const contract = createContract({
-  getPost: {
-    method: 'GET',
-    path: '/users/:userId/posts/:postId',
-    pathParams: z.object({
-      userId: z.string(),
-      postId: z.string(),
-    }),
-    responses: {
-      200: z.object({ id: z.string(), title: z.string() }),
-    },
-  },
-});
-
-const api = initContract(contract).use(pathPlugin).build();
-
-const url = api.getPost.buildPath({ userId: '123', postId: '456' });
+// Multiple parameters
+api.getPost.buildPath({ userId: '123', postId: '456' });
 // => "/users/123/posts/456"
 ```
 
@@ -263,140 +217,26 @@ const url = api.getUser.buildPath(
 
 ## Common Use Cases
 
-### Client-Side Fetch Requests
-
 ```ts
+// Client-side fetch
 async function fetchUser(id: string) {
   const url = api.getUser.buildPath({ id });
   const response = await fetch(url);
   return response.json();
 }
-```
 
-### React Query Integration
-
-```ts
-import { useQuery } from '@tanstack/react-query';
-
+// React Query integration
 function useUser(id: string) {
   return useQuery({
     queryKey: ['user', id],
     queryFn: async () => {
-      const url = api.getUser.buildPath({ id });
-      const response = await fetch(url);
+      const response = await fetch(api.getUser.buildPath({ id }));
       return response.json();
     },
   });
 }
 ```
 
-### Building Links in Components
-
-```tsx
-function UserLink({ userId }: { userId: string }) {
-  const href = api.getUser.buildPath({ id: userId });
-  
-  return <a href={href}>View User</a>;
-}
-```
-
-### Testing and Mocking
-
-```ts
-import { describe, it, expect } from 'vitest';
-
-describe('User API', () => {
-  it('builds correct user URL', () => {
-    const url = api.getUser.buildPath({ id: '123' });
-    expect(url).toBe('/users/123');
-  });
-  
-  it('builds correct URL with query params', () => {
-    const url = api.listUsers.buildPath(undefined, { page: '2' });
-    expect(url).toBe('/users?page=2');
-  });
-});
-```
-
-### Dynamic Route Generation
-
-```ts
-function buildApiUrls(userId: string) {
-  return {
-    user: api.getUser.buildPath({ id: userId }),
-    posts: api.getUserPosts.buildPath({ userId }),
-    comments: api.getUserComments.buildPath({ userId }),
-  };
-}
-
-const urls = buildApiUrls('123');
-// {
-//   user: '/users/123',
-//   posts: '/users/123/posts',
-//   comments: '/users/123/comments'
-// }
-```
-
-## Advanced Patterns
-
-### Base URL Handling
-
-The path plugin returns relative paths. Add your base URL separately:
-
-```ts
-const BASE_URL = 'https://api.example.com';
-
-async function fetchUser(id: string) {
-  const path = api.getUser.buildPath({ id });
-  const url = `${BASE_URL}${path}`;
-  
-  const response = await fetch(url);
-  return response.json();
-}
-```
-
-Or create a wrapper:
-
-```ts
-function buildFullUrl(path: string): string {
-  return `${process.env.API_BASE_URL}${path}`;
-}
-
-const fullUrl = buildFullUrl(api.getUser.buildPath({ id: '123' }));
-// => "https://api.example.com/users/123"
-```
-
-### Reusable Fetch Wrapper
-
-```ts
-async function apiFetch<T>(path: string): Promise<T> {
-  const response = await fetch(`${BASE_URL}${path}`);
-  
-  if (!response.ok) {
-    throw new Error(`API error: ${response.status}`);
-  }
-  
-  return response.json();
-}
-
-// Usage
-const user = await apiFetch(api.getUser.buildPath({ id: '123' }));
-```
-
-### Type-Safe Route Builder
-
-```ts
-type RouteBuilder<T> = T extends { buildPath: (...args: infer Args) => string }
-  ? (...args: Args) => string
-  : never;
-
-function createRouteBuilder<T>(route: T): RouteBuilder<T> {
-  return (route as any).buildPath.bind(route);
-}
-
-const buildUserPath = createRouteBuilder(api.getUser);
-const url = buildUserPath({ id: '123' });
-```
 
 ## Error Handling
 
@@ -427,49 +267,9 @@ api.getPost.buildPath({ userId: '123' } as any);
 
 TypeScript will catch this at compile time if you don't use `as any`.
 
-## Performance Considerations
+## Performance
 
-The path plugin has minimal performance overhead:
-
-- **Bundle size**: ~500 bytes minified + gzipped
-- **Runtime**: Simple string interpolation and URLSearchParams
-- **Memory**: No caching or state
-
-It's safe to use in performance-critical applications.
-
-## Comparison with Manual URL Building
-
-### With pathPlugin
-
-```ts
-const url = api.getUser.buildPath({ id: '123' });
-```
-
-**Pros:**
-- ✅ Type-safe parameters
-- ✅ Automatic URL encoding
-- ✅ Consistent API across routes
-- ✅ Less boilerplate
-
-### Without pathPlugin (Manual)
-
-```ts
-function buildUserPath(id: string): string {
-  return `/users/${encodeURIComponent(id)}`;
-}
-
-const url = buildUserPath('123');
-```
-
-**Pros:**
-- ✅ Smaller bundle size
-- ✅ More control
-- ✅ No plugin dependency
-
-**Cons:**
-- ❌ Manual URL encoding
-- ❌ Repetitive code
-- ❌ Potential for mistakes
+Minimal overhead: ~500 bytes minified + gzipped. Safe for performance-critical applications.
 
 ## Next Steps
 

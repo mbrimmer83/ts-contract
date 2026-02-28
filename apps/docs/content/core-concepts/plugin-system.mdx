@@ -51,42 +51,6 @@ const user = api.getUser.validateResponse(200, {
 // => { id: '123', name: 'Alice', email: 'alice@example.com' }
 ```
 
-## The Builder Pattern
-
-### initContract()
-
-Creates a contract builder that accumulates plugins:
-
-```ts
-import { initContract } from '@ts-contract/core';
-
-const builder = initContract(contract);
-// builder has .use() and .build() methods
-```
-
-### .use(plugin)
-
-Adds a plugin to the builder. Plugins are applied in the order they're added:
-
-```ts
-const api = initContract(contract)
-  .use(pathPlugin)      // First plugin
-  .use(validatePlugin)  // Second plugin
-  .build();
-```
-
-### .build()
-
-Produces the final enhanced contract with all plugin methods:
-
-```ts
-const api = initContract(contract)
-  .use(pathPlugin)
-  .use(validatePlugin)
-  .build();
-
-// api now has all methods from both plugins
-```
 
 ## How Plugins Extend Routes
 
@@ -126,17 +90,7 @@ api.getUser.validateResponse(200, { id: '123', name: 'Alice' });
 
 ## Plugin Execution Order
 
-Plugins are applied in the order you call `.use()`:
-
-```ts
-const api = initContract(contract)
-  .use(pluginA)  // Applied first
-  .use(pluginB)  // Applied second
-  .use(pluginC)  // Applied third
-  .build();
-```
-
-If plugins add methods with the same name, later plugins will override earlier ones. This is generally not recommended - each plugin should add unique methods.
+Plugins are applied in the order you call `.use()`. If plugins add methods with the same name, later plugins override earlier ones.
 
 ## Type Safety with Plugins
 
@@ -216,119 +170,89 @@ api.getUser.validateResponse(200, responseData);
 
 Learn more: [Validate Plugin](/plugins/validate-plugin)
 
-## Using Both Plugins Together
+## WebSocket Plugins
 
-Most applications use both plugins for complete functionality:
-
-```ts
-import { initContract } from '@ts-contract/core';
-import { pathPlugin, validatePlugin } from '@ts-contract/plugins';
-import { contract } from './contract';
-
-export const api = initContract(contract)
-  .use(pathPlugin)
-  .use(validatePlugin)
-  .build();
-
-// Use in client code
-async function getUser(id: string) {
-  const url = api.getUser.buildPath({ id });
-  const response = await fetch(url);
-  const data = await response.json();
-  
-  // Validate the response
-  return api.getUser.validateResponse(200, data);
-}
-
-// Use in server code
-app.get('/users/:id', (req, res) => {
-  const params = api.getUser.validatePathParams(req.params);
-  const user = database.findUser(params.id);
-  res.json(user);
-});
-```
-
-## Nested Contracts with Plugins
-
-Plugins work seamlessly with nested contracts:
+WebSocket definitions use separate plugins via the `.useWebSocket()` method:
 
 ```ts
+import { websocketPathPlugin, websocketValidatePlugin } from '@ts-contract/plugins';
+
 const contract = createContract({
-  users: {
-    getUser: {
-      method: 'GET',
-      path: '/users/:id',
-      pathParams: z.object({ id: z.string() }),
-      responses: {
-        200: z.object({ id: z.string(), name: z.string() }),
-      },
+  chat: {
+    type: 'websocket',
+    path: '/ws/chat/:roomId',
+    pathParams: z.object({ roomId: z.string() }),
+    clientMessages: {
+      new_msg: z.object({
+        type: z.literal('new_msg'),
+        body: z.string(),
+      }),
     },
-    listUsers: {
-      method: 'GET',
-      path: '/users',
-      responses: {
-        200: z.array(z.object({ id: z.string(), name: z.string() })),
-      },
-    },
-  },
-  posts: {
-    getPost: {
-      method: 'GET',
-      path: '/posts/:id',
-      pathParams: z.object({ id: z.string() }),
-      responses: {
-        200: z.object({ id: z.string(), title: z.string() }),
-      },
+    serverMessages: {
+      new_msg: z.object({
+        type: z.literal('new_msg'),
+        id: z.string(),
+        body: z.string(),
+      }),
     },
   },
 });
 
 const api = initContract(contract)
-  .use(pathPlugin)
+  .useWebSocket(websocketPathPlugin)
+  .useWebSocket(websocketValidatePlugin)
   .build();
 
-// Access nested routes
-api.users.getUser.buildPath({ id: '123' });
-api.users.listUsers.buildPath();
-api.posts.getPost.buildPath({ id: '456' });
+// Build WebSocket URL
+api.chat.buildPath({ roomId: '123' });
+// => "/ws/chat/123"
+
+// Validate messages
+api.chat.validateClientMessage('new_msg', { type: 'new_msg', body: 'Hello!' });
+api.chat.validateServerMessage('new_msg', data);
 ```
 
-## When to Use Plugins vs Manual Implementation
+### WebSocket Plugin Methods
 
-### Use Plugins When:
+**websocketPathPlugin** adds:
+- `buildPath()` - Build WebSocket URLs with path parameters and query strings
 
-- You want runtime utilities (path building, validation)
-- You need consistent behavior across all routes
-- You want to avoid repetitive code
-- You're building a client library or SDK
+**websocketValidatePlugin** adds:
+- `validateClientMessage()` - Validate outgoing messages
+- `validateServerMessage()` - Validate incoming messages
+- `validatePathParams()` - Validate connection path parameters
+- `validateQuery()` - Validate connection query parameters
+- `validateHeaders()` - Validate connection headers
 
-### Manual Implementation When:
+Learn more: [WebSocket Plugins](/plugins/websocket-plugins)
 
-- You only need type inference (no runtime utilities)
-- You have custom requirements not met by plugins
-- You want minimal bundle size
-- You're integrating with existing utilities
+## Using Both Plugins Together
 
-**Example without plugins (type inference only):**
+Most applications use both plugins:
 
 ```ts
-import { type InferPathParams, type InferResponseBody } from '@ts-contract/core';
-import { contract } from './contract';
+export const api = initContract(contract)
+  .use(pathPlugin)
+  .use(validatePlugin)
+  .build();
 
-type Params = InferPathParams<typeof contract.getUser>;
-type User = InferResponseBody<typeof contract.getUser, 200>;
-
-// Manually build path
-function buildUserPath(params: Params): string {
-  return `/users/${params.id}`;
-}
-
-// Manually validate (or skip validation)
-async function getUser(id: string): Promise<User> {
-  const response = await fetch(buildUserPath({ id }));
-  return response.json(); // Trust the response shape
-}
+// Client usage
+const url = api.getUser.buildPath({ id });
+const data = await fetch(url).then(r => r.json());
+return api.getUser.validateResponse(200, data);
 ```
+
+
+## When to Use Plugins
+
+**Use plugins when:**
+- You want runtime utilities (path building, validation)
+- You need consistent behavior across all routes
+- You're building a client library or SDK
+
+**Skip plugins when:**
+- You only need type inference (no runtime utilities)
+- You want absolute minimal bundle size
 
 ## Creating Custom Plugins
 
@@ -336,7 +260,7 @@ You can create your own plugins to add custom functionality. See [Creating Custo
 
 ## Next Steps
 
-- Explore the [Path Plugin](/plugins/path-plugin) for URL building
-- Learn about the [Validate Plugin](/plugins/validate-plugin) for runtime validation
+- Explore [Path Plugin](/plugins/path-plugin) and [WebSocket Plugins](/plugins/websocket-plugins)
+- Learn about [Validate Plugin](/plugins/validate-plugin) for runtime validation
 - See [Creating Custom Plugins](/plugins/creating-custom-plugins) to build your own
 - Review [Best Practices](/guides/best-practices) for plugin usage patterns

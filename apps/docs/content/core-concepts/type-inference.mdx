@@ -63,8 +63,9 @@ const contract = createContract({
 
 ## Available Type Helpers
 
-ts-contract exports several type helpers from `@ts-contract/core`:
+ts-contract exports type helpers for both HTTP and WebSocket contracts from `@ts-contract/core`:
 
+**HTTP Type Helpers:**
 ```ts
 import type {
   InferPathParams,
@@ -74,6 +75,19 @@ import type {
   InferResponseBody,
   InferResponses,
   InferArgs,
+} from '@ts-contract/core';
+```
+
+**WebSocket Type Helpers:**
+```ts
+import type {
+  InferWebSocketPathParams,
+  InferWebSocketQuery,
+  InferWebSocketHeaders,
+  InferClientMessages,
+  InferServerMessages,
+  InferClientMessage,
+  InferServerMessage,
 } from '@ts-contract/core';
 ```
 
@@ -149,66 +163,90 @@ type Args = InferArgs<typeof contract.updateUser>;
 // }
 ```
 
+## WebSocket Type Inference
+
+Extract types from WebSocket definitions:
+
+```ts
+import { createContract } from '@ts-contract/core';
+import type {
+  InferWebSocketPathParams,
+  InferClientMessage,
+  InferServerMessage,
+} from '@ts-contract/core';
+import { z } from 'zod';
+
+const contract = createContract({
+  chat: {
+    type: 'websocket',
+    path: '/ws/chat/:roomId',
+    pathParams: z.object({ roomId: z.string() }),
+    clientMessages: {
+      new_msg: z.object({
+        type: z.literal('new_msg'),
+        body: z.string(),
+      }),
+    },
+    serverMessages: {
+      new_msg: z.object({
+        type: z.literal('new_msg'),
+        id: z.string(),
+        body: z.string(),
+      }),
+    },
+  },
+});
+
+// Infer path parameters
+type Params = InferWebSocketPathParams<typeof contract.chat>;
+// => { roomId: string }
+
+// Infer specific message types
+type ClientMsg = InferClientMessage<typeof contract.chat, 'new_msg'>;
+// => { type: 'new_msg', body: string }
+
+type ServerMsg = InferServerMessage<typeof contract.chat, 'new_msg'>;
+// => { type: 'new_msg', id: string, body: string }
+```
+
+Learn more: [WebSocket Contracts](/core-concepts/websocket-contracts)
+
 ## Usage Examples
 
 For complete usage examples, see:
 
-- **Server-side**: [Express Integration](/recipes/server/express), [Hono Integration](/recipes/server/hono), [Fastify Integration](/recipes/server/fastify)
-- **Client-side**: [React Query Integration](/recipes/client/react-query), [Vanilla Fetch](/recipes/client/vanilla-fetch)
-- **Full-stack**: [E2E Type Safety](/recipes/full-stack/e2e-type-safety)
+- **Server-side**: [Express Integration](/recipes/server/express), [Hono Integration](/recipes/server/hono)
+- **Client-side**: [React Query Integration](/recipes/client/react-query)
+- **WebSocket**: [Phoenix.js Chat](/recipes/websocket/phoenix-chat)
 
-## Tips for Maximizing Type Inference
+## Tips for Type Inference
 
-### 1. Use `typeof` to Reference Routes
+### Use `typeof` to Reference Definitions
 
-Always use `typeof` when extracting types from your contract:
+Always use `typeof` when extracting types:
 
 ```ts
-// Good
 type Params = InferPathParams<typeof contract.getUser>;
-
-// Bad - won't work
-type Params = InferPathParams<contract.getUser>;
+type WsParams = InferWebSocketPathParams<typeof contract.chat>;
 ```
 
-### 2. Extract Types at Module Level
+### Extract Types at Module Level
 
 Define types at the module level for reuse:
 
 ```ts
-// types.ts
-import type { InferResponseBody } from '@ts-contract/core';
-import { contract } from './contract';
-
 export type User = InferResponseBody<typeof contract.getUser, 200>;
-export type UserList = InferResponseBody<typeof contract.listUsers, 200>;
+export type ChatMessage = InferClientMessage<typeof contract.chat, 'new_msg'>;
 ```
 
-### 3. Use Type Aliases for Clarity
+### Combine with Utility Types
 
-Create meaningful type aliases:
-
-```ts
-type UserId = InferPathParams<typeof contract.getUser>['id'];
-type CreateUserPayload = InferBody<typeof contract.createUser>;
-type UserResponse = InferResponseBody<typeof contract.getUser, 200>;
-```
-
-### 4. Combine with Utility Types
-
-TypeScript utility types work great with inferred types:
+TypeScript utility types work with inferred types:
 
 ```ts
 type User = InferResponseBody<typeof contract.getUser, 200>;
-
-// Partial user for updates
 type PartialUser = Partial<User>;
-
-// User without ID for creation
 type NewUser = Omit<User, 'id'>;
-
-// Pick specific fields
-type UserSummary = Pick<User, 'id' | 'name'>;
 ```
 
 
@@ -216,4 +254,5 @@ type UserSummary = Pick<User, 'id' | 'name'>;
 
 - Learn about the [Plugin System](/core-concepts/plugin-system) to add runtime utilities
 - See [Contracts](/core-concepts/contracts) for organizing your API
-- Explore [Routes & Schemas](/core-concepts/routes-and-schemas) for defining route details
+- Explore [HTTP Routes & Schemas](/core-concepts/routes-and-schemas) for HTTP details
+- Read [WebSocket Contracts](/core-concepts/websocket-contracts) for WebSocket details

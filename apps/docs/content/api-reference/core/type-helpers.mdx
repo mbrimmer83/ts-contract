@@ -413,187 +413,95 @@ const request = buildUpdateRequest({
 });
 ```
 
-## Practical Examples
 
-### Server-Side Types
+
+## WebSocket Type Helpers
+
+ts-contract provides type helpers for WebSocket contracts:
+
+### InferWebSocketPathParams
+
+Extract path parameter types from a WebSocket definition:
 
 ```ts
-import type { InferPathParams, InferBody, InferResponseBody } from '@ts-contract/core';
-import express from 'express';
-import { contract } from './contract';
+import type { InferWebSocketPathParams } from '@ts-contract/core';
 
-type Params = InferPathParams<typeof contract.updateUser>;
-type Body = InferBody<typeof contract.updateUser>;
-type SuccessResponse = InferResponseBody<typeof contract.updateUser, 200>;
-type ErrorResponse = InferResponseBody<typeof contract.updateUser, 400>;
-
-const app = express();
-
-app.put('/users/:id', (req, res) => {
-  const { id } = req.params as Params;
-  const body = req.body as Body;
-  
-  try {
-    const user = database.updateUser(id, body);
-    const response: SuccessResponse = { id: user.id };
-    res.json(response);
-  } catch (error) {
-    const response: ErrorResponse = { message: error.message };
-    res.status(400).json(response);
-  }
-});
+type Params = InferWebSocketPathParams<typeof contract.chat>;
+// => { roomId: string }
 ```
 
-### Client-Side Types
+### InferWebSocketQuery
+
+Extract query parameter types:
 
 ```ts
-import type { InferPathParams, InferResponseBody } from '@ts-contract/core';
-import { contract } from './contract';
+import type { InferWebSocketQuery } from '@ts-contract/core';
 
-type Params = InferPathParams<typeof contract.getUser>;
-type User = InferResponseBody<typeof contract.getUser, 200>;
-
-async function fetchUser(id: Params['id']): Promise<User> {
-  const response = await fetch(`/users/${id}`);
-  const user: User = await response.json();
-  return user;
-}
+type Query = InferWebSocketQuery<typeof contract.chat>;
+// => { token?: string }
 ```
 
-### React Query Hook
+### InferWebSocketHeaders
+
+Extract header types:
 
 ```ts
-import { useQuery } from '@tanstack/react-query';
-import type { InferResponseBody } from '@ts-contract/core';
-import { contract } from './contract';
+import type { InferWebSocketHeaders } from '@ts-contract/core';
 
-type User = InferResponseBody<typeof contract.getUser, 200>;
-
-export function useUser(id: string) {
-  return useQuery<User>({
-    queryKey: ['user', id],
-    queryFn: async () => {
-      const response = await fetch(`/users/${id}`);
-      return response.json();
-    },
-  });
-}
+type Headers = InferWebSocketHeaders<typeof contract.chat>;
+// => { authorization: string }
 ```
 
-### Form Types
+### InferClientMessages
+
+Extract all client message types:
 
 ```ts
-import type { InferBody } from '@ts-contract/core';
-import { contract } from './contract';
+import type { InferClientMessages } from '@ts-contract/core';
 
-type CreateUserForm = InferBody<typeof contract.createUser>;
-
-function UserForm() {
-  const [formData, setFormData] = useState<CreateUserForm>({
-    name: '',
-    email: '',
-  });
-  
-  const handleSubmit = async (e: React.FormEvent) => {
-    e.preventDefault();
-    await createUser(formData);
-  };
-  
-  return <form onSubmit={handleSubmit}>{/* ... */}</form>;
-}
+type ClientMsgs = InferClientMessages<typeof contract.chat>;
+// => { new_msg: { type: 'new_msg', body: string }, ... }
 ```
 
-### API Client Class
+### InferServerMessages
+
+Extract all server message types:
 
 ```ts
-import type { InferPathParams, InferBody, InferResponseBody } from '@ts-contract/core';
-import { contract } from './contract';
+import type { InferServerMessages } from '@ts-contract/core';
 
-class UserClient {
-  async getUser(id: InferPathParams<typeof contract.getUser>['id']) {
-    type Response = InferResponseBody<typeof contract.getUser, 200>;
-    const response = await fetch(`/users/${id}`);
-    return response.json() as Promise<Response>;
-  }
-  
-  async createUser(body: InferBody<typeof contract.createUser>) {
-    type Response = InferResponseBody<typeof contract.createUser, 201>;
-    const response = await fetch('/users', {
-      method: 'POST',
-      headers: { 'Content-Type': 'application/json' },
-      body: JSON.stringify(body),
-    });
-    return response.json() as Promise<Response>;
-  }
-}
+type ServerMsgs = InferServerMessages<typeof contract.chat>;
+// => { new_msg: { type: 'new_msg', id: string, body: string }, ... }
 ```
 
-## Combining with Utility Types
+### InferClientMessage
 
-TypeScript's built-in utility types work great with inferred types:
-
-### Partial
+Extract a specific client message type:
 
 ```ts
-type User = InferResponseBody<typeof contract.getUser, 200>;
-type PartialUser = Partial<User>;
-// All properties optional
+import type { InferClientMessage } from '@ts-contract/core';
+
+type NewMsg = InferClientMessage<typeof contract.chat, 'new_msg'>;
+// => { type: 'new_msg', body: string }
 ```
 
-### Required
+### InferServerMessage
+
+Extract a specific server message type:
 
 ```ts
-type Query = InferQuery<typeof contract.listUsers>;
-type RequiredQuery = Required<Query>;
-// All properties required
+import type { InferServerMessage } from '@ts-contract/core';
+
+type NewMsg = InferServerMessage<typeof contract.chat, 'new_msg'>;
+// => { type: 'new_msg', id: string, body: string }
 ```
 
-### Pick
+**Usage:**
 
 ```ts
-type User = InferResponseBody<typeof contract.getUser, 200>;
-type UserSummary = Pick<User, 'id' | 'name'>;
-// Only id and name
-```
-
-### Omit
-
-```ts
-type User = InferResponseBody<typeof contract.getUser, 200>;
-type UserWithoutId = Omit<User, 'id'>;
-// All properties except id
-```
-
-### Record
-
-```ts
-type UserId = InferPathParams<typeof contract.getUser>['id'];
-type User = InferResponseBody<typeof contract.getUser, 200>;
-type UserMap = Record<UserId, User>;
-// Map of user IDs to users
-```
-
-## Advanced Patterns
-
-### Conditional Types
-
-```ts
-type User = InferResponseBody<typeof contract.getUser, 200>;
-
-type UserOrNull<T extends boolean> = T extends true ? User : null;
-
-const user: UserOrNull<true> = { id: '1', name: 'Alice' };
-const noUser: UserOrNull<false> = null;
-```
-
-### Mapped Types
-
-```ts
-type User = InferResponseBody<typeof contract.getUser, 200>;
-
-type ReadonlyUser = {
-  readonly [K in keyof User]: User[K];
-};
+type Params = InferWebSocketPathParams<typeof contract.chat>;
+type ClientMsg = InferClientMessage<typeof contract.chat, 'new_msg'>;
+type ServerMsg = InferServerMessage<typeof contract.chat, 'new_msg'>;
 ```
 
 ### Template Literal Types
@@ -674,3 +582,10 @@ const user = await response.json() as User;
 - [Type Inference Guide](/core-concepts/type-inference) - Learn about type inference
 - [createContract](/api-reference/core/create-contract) - Create a contract
 - [Routes & Schemas](/core-concepts/routes-and-schemas) - Route definition details
+
+## Next Steps
+
+- See [Type Inference](/core-concepts/type-inference) for practical usage
+- Review [Contracts](/core-concepts/contracts) for defining contracts
+- Explore [HTTP Routes & Schemas](/core-concepts/routes-and-schemas) for HTTP details
+- Read [WebSocket Contracts](/core-concepts/websocket-contracts) for WebSocket details

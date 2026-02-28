@@ -7,7 +7,8 @@ export function ConstructionBanner() {
             🚧
           </span>
           <p className="font-medium">
-            Under Construction - This documentation is actively being developed
+            Alpha Release - This project is in early development and APIs may
+            change
           </p>
         </div>
       </div>

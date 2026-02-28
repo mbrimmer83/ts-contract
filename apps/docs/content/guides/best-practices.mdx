@@ -5,38 +5,6 @@ description: Best practices and patterns for using ts-contract effectively in pr
 
 ## Contract Design
 
-### Keep Contracts Focused
-
-Design contracts around business domains, not technical layers:
-
-```ts
-// ✓ Good - organized by domain
-const contract = createContract({
-  users: {
-    list: { /* ... */ },
-    get: { /* ... */ },
-    create: { /* ... */ },
-  },
-  posts: {
-    list: { /* ... */ },
-    get: { /* ... */ },
-    create: { /* ... */ },
-  },
-});
-
-// ✗ Avoid - organized by HTTP method
-const contract = createContract({
-  get: {
-    users: { /* ... */ },
-    posts: { /* ... */ },
-  },
-  post: {
-    users: { /* ... */ },
-    posts: { /* ... */ },
-  },
-});
-```
-
 ### Use Shared Schemas
 
 Extract common schemas to avoid duplication:
@@ -452,49 +420,18 @@ import { pathPlugin } from '@ts-contract/plugins';
 import * as tsContract from '@ts-contract/core';
 ```
 
-### Use Faster Schema Libraries
 
-For performance-critical applications:
+### Conditional Validation
 
-```ts
-// Valibot is faster than Zod
-import * as v from 'valibot';
-
-const contract = createContract({
-  users: {
-    get: {
-      method: 'GET',
-      path: '/users/:id',
-      pathParams: v.object({ id: v.string() }),
-      responses: {
-        200: v.object({
-          id: v.string(),
-          name: v.string(),
-        }),
-      },
-    },
-  },
-});
-```
-
-### Cache Validation Results
-
-For repeated validations:
+Validate only in development or at boundaries:
 
 ```ts
-const validationCache = new Map();
+const shouldValidate = process.env.NODE_ENV !== 'production';
 
-function validateWithCache(key: string, data: unknown, validator: any) {
-  const cacheKey = `${key}:${JSON.stringify(data)}`;
-  
-  if (validationCache.has(cacheKey)) {
-    return validationCache.get(cacheKey);
-  }
-  
-  const result = validator(data);
-  validationCache.set(cacheKey, result);
-  
-  return result;
+async function fetchUser(id: string) {
+  const response = await fetch(api.users.get.buildPath({ id }));
+  const data = await response.json();
+  return shouldValidate ? api.users.get.validateResponse(200, data) : data;
 }
 ```
 
@@ -506,6 +443,79 @@ For trusted internal APIs:
 const api = process.env.NODE_ENV === 'production'
   ? initContract(contract).use(pathPlugin).build()
   : initContract(contract).use(pathPlugin).use(validatePlugin).build();
+```
+
+## WebSocket Contracts
+
+### Message Type Discriminators
+
+Always include type discriminators matching event names:
+
+```ts
+const contract = createContract({
+  chat: {
+    type: 'websocket',
+    path: '/ws/chat/:roomId',
+    pathParams: z.object({ roomId: z.string() }),
+    clientMessages: {
+      // ✓ Good - type matches event name
+      new_msg: z.object({
+        type: z.literal('new_msg'),
+        body: z.string(),
+      }),
+      // ✗ Avoid - missing type discriminator
+      typing: z.object({
+        isTyping: z.boolean(),
+      }),
+    },
+    serverMessages: {
+      new_msg: z.object({
+        type: z.literal('new_msg'),
+        id: z.string(),
+        body: z.string(),
+      }),
+    },
+  },
+});
+```
+
+### Organize by Channel/Topic
+
+Group WebSocket definitions by channel or topic:
+
+```ts
+const contract = createContract({
+  websockets: {
+    chat: { type: 'websocket', path: '/ws/chat/:roomId', /* ... */ },
+    notifications: { type: 'websocket', path: '/ws/notifications', /* ... */ },
+    presence: { type: 'websocket', path: '/ws/presence/:userId', /* ... */ },
+  },
+});
+```
+
+### Validate Messages at Boundaries
+
+Validate incoming and outgoing WebSocket messages:
+
+```ts
+// Validate incoming messages
+channel.on('new_msg', (data: unknown) => {
+  try {
+    const msg = api.chat.validateServerMessage('new_msg', data);
+    handleMessage(msg);
+  } catch (error) {
+    console.error('Invalid message:', error);
+  }
+});
+
+// Validate outgoing messages
+function sendMessage(body: string) {
+  const msg = api.chat.validateClientMessage('new_msg', {
+    type: 'new_msg',
+    body,
+  });
+  channel.push('new_msg', msg);
+}
 ```
 
 ## Testing
@@ -807,31 +817,7 @@ const user = await fetchUser('123');
 
 ### Version Carefully
 
-Use semantic versioning:
-
-- **Patch** (1.0.x): Bug fixes, no breaking changes
-- **Minor** (1.x.0): New features, backward compatible
-- **Major** (x.0.0): Breaking changes
-
-### Use CI/CD
-
-```yaml
-# .github/workflows/ci.yml
-name: CI
-
-on: [push, pull_request]
-
-jobs:
-  test:
-    runs-on: ubuntu-latest
-    steps:
-      - uses: actions/checkout@v3
-      - uses: pnpm/action-setup@v2
-      - run: pnpm install
-      - run: pnpm type-check
-      - run: pnpm test
-      - run: pnpm build
-```
+Use semantic versioning for breaking changes (major), new features (minor), and bug fixes (patch).
 
 ## Common Pitfalls
 
@@ -898,6 +884,7 @@ const user = api.users.get.buildPath({ id: '123' });
 
 ## Next Steps
 
-- Review [FAQ](/guides/faq) for common questions
-- Explore [Recipes](/recipes/server/hono) for integration examples
-- Check [API Reference](/api-reference/core/create-contract) for detailed documentation
+- Review [Contracts](/core-concepts/contracts) for organizing your API
+- See [WebSocket Contracts](/core-concepts/websocket-contracts) for real-time APIs
+- Explore [Type Inference](/core-concepts/type-inference) for extracting types
+- Check out [FAQ](/guides/faq) for common questions

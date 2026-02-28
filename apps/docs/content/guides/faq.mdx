@@ -57,16 +57,12 @@ If you only need type inference without runtime utilities, you can skip the plug
 
 ### Can I use ts-contract in a monorepo?
 
-Yes! This is the recommended approach. Create a shared contract package that both your frontend and backend depend on. See the [Monorepo Setup](/recipes/full-stack/monorepo) guide.
-
-### How do I set up a monorepo with ts-contract?
+Yes! This is the recommended approach. Create a shared contract package that both your frontend and backend depend on.
 
 1. Create a `packages/contract` directory
 2. Define your contract in the package
 3. Add the contract package as a dependency to your apps
 4. Import and use the contract in both frontend and backend
-
-See the complete [Monorepo Setup](/recipes/full-stack/monorepo) guide for details.
 
 ## Contract Definition
 
@@ -235,10 +231,15 @@ type Response = InferResponses<typeof contract.getUser>;
 
 ### What are plugins?
 
-Plugins add runtime utilities to your contract routes. The built-in plugins are:
+Plugins add runtime utilities to your contracts. The built-in plugins are:
 
+**HTTP Plugins:**
 - **pathPlugin** - Adds `buildPath()` for URL construction
 - **validatePlugin** - Adds validation methods
+
+**WebSocket Plugins:**
+- **websocketPathPlugin** - Adds `buildPath()` for WebSocket URLs
+- **websocketValidatePlugin** - Adds message validation methods
 
 ### Do I need to use plugins?
 
@@ -259,17 +260,14 @@ const url = api.getUser.buildPath({ id: '123' });
 
 ### How do I use plugins?
 
-Use `initContract()` to create a builder, add plugins with `.use()`, and call `.build()`:
-
 ```ts
-import { initContract } from '@ts-contract/core';
-import { pathPlugin, validatePlugin } from '@ts-contract/plugins';
-
 const api = initContract(contract)
   .use(pathPlugin)
   .use(validatePlugin)
   .build();
 ```
+
+See [Plugin System](/core-concepts/plugin-system) for details.
 
 ### Can I create custom plugins?
 
@@ -277,23 +275,91 @@ Yes! See the [Creating Custom Plugins](/plugins/creating-custom-plugins) guide f
 
 ### Should I use plugins on the server?
 
-It depends:
+Servers typically only need `validatePlugin` for request validation. Clients use both `pathPlugin` and `validatePlugin`.
 
-- **pathPlugin**: Usually not needed on the server (your framework handles routing)
-- **validatePlugin**: Very useful for validating request data
+## WebSocket Questions
+
+### How do I define a WebSocket contract?
+
+Use `type: 'websocket'` and define client/server message schemas:
 
 ```ts
-// Server - only validation
+const contract = createContract({
+  chat: {
+    type: 'websocket',
+    path: '/ws/chat/:roomId',
+    pathParams: z.object({ roomId: z.string() }),
+    clientMessages: {
+      new_msg: z.object({
+        type: z.literal('new_msg'),
+        body: z.string(),
+      }),
+    },
+    serverMessages: {
+      new_msg: z.object({
+        type: z.literal('new_msg'),
+        id: z.string(),
+        body: z.string(),
+      }),
+    },
+  },
+});
+```
+
+### Do WebSocket messages need type discriminators?
+
+Yes! Each message schema should include a `type` field matching the event name:
+
+```ts
+clientMessages: {
+  // ✓ Good - type matches event name
+  new_msg: z.object({
+    type: z.literal('new_msg'),
+    body: z.string(),
+  }),
+}
+```
+
+### How do I use WebSocket plugins?
+
+Use `.useWebSocket()` instead of `.use()`:
+
+```ts
+import { websocketPathPlugin, websocketValidatePlugin } from '@ts-contract/plugins';
+
 const api = initContract(contract)
-  .use(validatePlugin)
+  .useWebSocket(websocketPathPlugin)
+  .useWebSocket(websocketValidatePlugin)
   .build();
 
-// Client - both plugins
-const api = initContract(contract)
-  .use(pathPlugin)
-  .use(validatePlugin)
-  .build();
+api.chat.buildPath({ roomId: '123' });
+api.chat.validateClientMessage('new_msg', data);
 ```
+
+### Can I mix HTTP and WebSocket in one contract?
+
+Yes! You can have both HTTP routes and WebSocket definitions:
+
+```ts
+const contract = createContract({
+  http: {
+    getUser: { method: 'GET', path: '/users/:id', /* ... */ },
+  },
+  ws: {
+    chat: { type: 'websocket', path: '/ws/chat', /* ... */ },
+  },
+});
+```
+
+### What WebSocket frameworks are supported?
+
+ts-contract is framework-agnostic. It works with:
+- Native WebSocket API
+- Phoenix.js (Elixir)
+- Socket.io
+- Any WebSocket library
+
+See the [Phoenix.js Chat Recipe](/recipes/websocket/phoenix-chat) for an example.
 
 ## Validation
 
@@ -601,7 +667,9 @@ Open an issue on GitHub describing:
 
 ## Next Steps
 
-- Read the [Best Practices](/guides/best-practices) guide
-- Explore [Recipes](/recipes/server/hono) for integration examples
-- Check the [API Reference](/api-reference/core/create-contract) for detailed documentation
+- Check out [Getting Started](/getting-started) for a quick introduction
+- See [Contracts](/core-concepts/contracts) for organizing your API
+- Explore [WebSocket Contracts](/core-concepts/websocket-contracts) for real-time APIs
+- Review [Type Inference](/core-concepts/type-inference) for extracting types
+- Check [Best Practices](/guides/best-practices) for production tips
 - Set up a [Monorepo](/recipes/full-stack/monorepo) for your project

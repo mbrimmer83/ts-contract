@@ -3,9 +3,11 @@ title: Creating Custom Plugins
 description: Build your own plugins to extend ts-contract with custom functionality.
 ---
 
-## Plugin Interface
+## Plugin Interfaces
 
-A plugin in ts-contract is an object that implements the `ContractPlugin` interface:
+### HTTP Plugins
+
+HTTP plugins implement the `ContractPlugin` interface:
 
 ```ts
 interface ContractPlugin<Name extends string = string> {
@@ -14,8 +16,16 @@ interface ContractPlugin<Name extends string = string> {
 }
 ```
 
-- **name** - Unique identifier for the plugin
-- **route** - Function that receives a route definition and returns methods to add to that route
+### WebSocket Plugins
+
+WebSocket plugins implement the `WebSocketPlugin` interface:
+
+```ts
+interface WebSocketPlugin<Name extends string = string> {
+  name: Name;
+  websocket: (ws: WebSocketDef) => Record<string, unknown>;
+}
+```
 
 ## Basic Plugin Example
 
@@ -128,26 +138,11 @@ api.getUser.anotherMethod('test');
 
 ### Example 1: OpenAPI Metadata Plugin
 
-Generate OpenAPI metadata for each route:
-
 ```ts
-import type { ContractPlugin, RouteDef } from '@ts-contract/core';
-
-interface OpenAPIOperation {
-  operationId: string;
-  summary?: string;
-  tags: string[];
-  parameters: Array<{
-    name: string;
-    in: 'path' | 'query' | 'header';
-    required: boolean;
-  }>;
-}
-
 declare module '@ts-contract/core' {
   interface PluginTypeRegistry<R> {
     openapi: {
-      getOpenAPIOperation: () => OpenAPIOperation;
+      getOperationId: () => string;
     };
   }
 }
@@ -155,178 +150,14 @@ declare module '@ts-contract/core' {
 export const openapiPlugin: ContractPlugin<'openapi'> = {
   name: 'openapi',
   route: (route: RouteDef) => ({
-    getOpenAPIOperation: (): OpenAPIOperation => {
-      const parameters: OpenAPIOperation['parameters'] = [];
-      
-      // Extract path parameters
-      const pathParams = route.path.match(/:([^/]+)/g) || [];
-      pathParams.forEach(param => {
-        parameters.push({
-          name: param.slice(1),
-          in: 'path',
-          required: true,
-        });
-      });
-      
-      // Extract query parameters
-      if (route.query) {
-        // Note: In real implementation, you'd introspect the schema
-        parameters.push({
-          name: 'query',
-          in: 'query',
-          required: false,
-        });
-      }
-      
-      return {
-        operationId: `${route.method.toLowerCase()}_${route.path.replace(/[/:]/g, '_')}`,
-        summary: route.summary,
-        tags: route.metadata?.tags as string[] || [],
-        parameters,
-      };
+    getOperationId: () => {
+      return `${route.method.toLowerCase()}_${route.path.replace(/[/:]/g, '_')}`;
     },
   }),
 };
-
-// Usage
-const api = initContract(contract)
-  .use(openapiPlugin)
-  .build();
-
-const operation = api.getUser.getOpenAPIOperation();
-// {
-//   operationId: 'get_users_id',
-//   summary: 'Get user by ID',
-//   tags: [],
-//   parameters: [{ name: 'id', in: 'path', required: true }]
-// }
 ```
 
 ### Example 2: Mock Data Generator Plugin
-
-Generate mock data based on response schemas:
-
-```ts
-import type { ContractPlugin, RouteDef } from '@ts-contract/core';
-
-declare module '@ts-contract/core' {
-  interface PluginTypeRegistry<R> {
-    mock: {
-      generateMockResponse: (status: number) => any;
-    };
-  }
-}
-
-export const mockPlugin: ContractPlugin<'mock'> = {
-  name: 'mock',
-  route: (route: RouteDef) => ({
-    generateMockResponse: (status: number) => {
-      const schema = route.responses[status];
-      
-      if (!schema) {
-        throw new Error(`No response schema for status ${status}`);
-      }
-      
-      // Simple mock generation (in real implementation, use a library like faker)
-      // This is a simplified example
-      return {
-        id: '123',
-        name: 'Mock User',
-        email: 'mock@example.com',
-      };
-    },
-  }),
-};
-
-// Usage
-const api = initContract(contract)
-  .use(mockPlugin)
-  .build();
-
-const mockUser = api.getUser.generateMockResponse(200);
-// { id: '123', name: 'Mock User', email: 'mock@example.com' }
-```
-
-### Example 3: Request Builder Plugin
-
-Build complete fetch requests:
-
-```ts
-import type { ContractPlugin, RouteDef, InferPathParams, InferQuery, InferBody } from '@ts-contract/core';
-
-type RequestOptions<R extends RouteDef> = {
-  params?: InferPathParams<R>;
-  query?: InferQuery<R>;
-  body?: InferBody<R>;
-  headers?: Record<string, string>;
-};
-
-declare module '@ts-contract/core' {
-  interface PluginTypeRegistry<R> {
-    request: {
-      buildRequest: R extends RouteDef
-        ? (options: RequestOptions<R>) => Request
-        : never;
-    };
-  }
-}
-
-export const requestPlugin: ContractPlugin<'request'> = {
-  name: 'request',
-  route: (route: RouteDef) => ({
-    buildRequest: (options: any = {}) => {
-      // Build path
-      let path = route.path;
-      if (options.params) {
-        path = path.replace(/:([^/]+)/g, (_, key) => {
-          return encodeURIComponent(options.params[key]);
-        });
-      }
-      
-      // Add query string
-      if (options.query) {
-        const searchParams = new URLSearchParams();
-        for (const [key, value] of Object.entries(options.query)) {
-          if (value !== undefined && value !== null) {
-            searchParams.append(key, String(value));
-          }
-        }
-        const qs = searchParams.toString();
-        if (qs) path += `?${qs}`;
-      }
-      
-      // Build request
-      const init: RequestInit = {
-        method: route.method,
-        headers: {
-          'Content-Type': 'application/json',
-          ...options.headers,
-        },
-      };
-      
-      if (options.body) {
-        init.body = JSON.stringify(options.body);
-      }
-      
-      return new Request(path, init);
-    },
-  }),
-};
-
-// Usage
-const api = initContract(contract)
-  .use(requestPlugin)
-  .build();
-
-const request = api.createUser.buildRequest({
-  body: { name: 'Alice', email: 'alice@example.com' },
-  headers: { 'Authorization': 'Bearer token' },
-});
-
-const response = await fetch(request);
-```
-
-### Example 4: Cache Key Generator Plugin
 
 Generate cache keys for React Query or SWR:
 
@@ -706,9 +537,76 @@ Document your plugin's purpose and usage:
 export const loggerPlugin: ContractPlugin<'logger'> = { /* ... */ };
 ```
 
+## Creating WebSocket Plugins
+
+WebSocket plugins use a separate interface and registry:
+
+```ts
+import type { WebSocketPlugin, WebSocketDef } from '@ts-contract/core';
+
+// Step 1: Declare types using module augmentation
+declare module '@ts-contract/core' {
+  interface WebSocketPluginTypeRegistry<W> {
+    wsLogger: {
+      logConnection: () => void;
+    };
+  }
+}
+
+// Step 2: Implement the plugin
+export const wsLoggerPlugin: WebSocketPlugin<'wsLogger'> = {
+  name: 'wsLogger',
+  websocket: (ws: WebSocketDef) => ({
+    logConnection: () => {
+      console.log(`WebSocket: ${ws.path}`);
+      console.log(`Client messages: ${Object.keys(ws.clientMessages).join(', ')}`);
+      console.log(`Server messages: ${Object.keys(ws.serverMessages).join(', ')}`);
+    },
+  }),
+};
+
+// Step 3: Use the plugin
+const api = initContract(contract)
+  .useWebSocket(wsLoggerPlugin)
+  .build();
+
+api.chat.logConnection();
+// => "WebSocket: /ws/chat/:roomId"
+// => "Client messages: new_msg, typing"
+// => "Server messages: new_msg, user_joined"
+```
+
+### Type-Safe WebSocket Plugin
+
+Leverage WebSocket inference types:
+
+```ts
+import type {
+  WebSocketPlugin,
+  WebSocketDef,
+  InferClientMessages,
+} from '@ts-contract/core';
+
+declare module '@ts-contract/core' {
+  interface WebSocketPluginTypeRegistry<W> {
+    wsHelper: {
+      getClientEventNames: W extends WebSocketDef
+        ? () => Array<keyof InferClientMessages<W>>
+        : never;
+    };
+  }
+}
+
+export const wsHelperPlugin: WebSocketPlugin<'wsHelper'> = {
+  name: 'wsHelper',
+  websocket: (ws: WebSocketDef) => ({
+    getClientEventNames: () => Object.keys(ws.clientMessages),
+  }),
+};
+```
+
 ## Next Steps
 
-- Review [Plugin System](/core-concepts/plugin-system) for how plugins work internally
-- See [Path Plugin](/plugins/path-plugin) and [Validate Plugin](/plugins/validate-plugin) for reference implementations
-- Explore [Plugins Overview](/plugins/overview) for plugin capabilities
-- Check out community plugins for inspiration
+- Review [Path Plugin](/plugins/path-plugin) and [WebSocket Plugins](/plugins/websocket-plugins) source code
+- See [Validate Plugin](/plugins/validate-plugin) for validation patterns
+- Explore [Plugin System](/core-concepts/plugin-system) for how plugins work

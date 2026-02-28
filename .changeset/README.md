@@ -6,3 +6,96 @@ find the full documentation for it [in our repository](https://github.com/change
 
 We have a quick list of common questions to get you started engaging with this project in
 [our documentation](https://github.com/changesets/changesets/blob/main/docs/common-questions.md)
+
+## Creating a Changeset
+
+When you make changes that should be included in a release, create a changeset to document them:
+
+### From the root directory:
+
+```bash
+pnpm changeset
+```
+
+This will:
+
+1. Prompt you to select which packages have changed
+2. Ask you to choose the type of change (major, minor, patch)
+3. Request a summary of the changes
+
+### Changeset Types
+
+- **major** - Breaking changes (e.g., API changes, removed features)
+- **minor** - New features (e.g., new functionality, new APIs)
+- **patch** - Bug fixes and small improvements
+
+### Example Workflow
+
+```bash
+# 1. Make your changes to the codebase
+# 2. Create a changeset
+pnpm changeset
+
+# 3. Select packages (use space to select, enter to confirm):
+#    - @ts-contract/core (if you changed core)
+#    - @ts-contract/plugins (if you changed plugins)
+
+# 4. Choose version bump type:
+#    - patch (0.0.x) for bug fixes
+#    - minor (0.x.0) for new features
+#    - major (x.0.0) for breaking changes
+
+# 5. Write a summary describing your changes
+
+# 6. Commit the changeset file along with your changes
+git add .changeset/your-changeset-name.md
+git commit -m "feat: add new feature"
+```
+
+### Manual Changeset Creation
+
+You can also create changeset files manually in `.changeset/`:
+
+```markdown
+---
+'@ts-contract/core': minor
+'@ts-contract/plugins': minor
+---
+
+Add WebSocket contract support with bidirectional message schemas
+```
+
+### Release Process (Automated)
+
+Releases are **fully automated** via GitHub Actions:
+
+1. **Merge PR to main** - When your PR with a changeset is merged to `main`
+2. **Changesets bot creates a "Version Packages" PR** - This PR updates package versions and CHANGELOGs
+3. **Merge the "Version Packages" PR** - This triggers:
+   - Automatic publishing to npm
+   - GitHub releases creation
+   - Documentation deployment to Cloudflare Pages
+
+**You don't need to run any manual commands!** The CI pipeline handles everything.
+
+### Manual Release (If Needed)
+
+Only use these commands if you need to release locally (rare):
+
+```bash
+# Update package versions based on changesets
+pnpm changeset version
+
+# Build packages
+pnpm -r build
+
+# Publish to npm (requires npm authentication)
+pnpm changeset publish
+```
+
+### Best Practices
+
+1. **Create changesets with your PR** - Don't wait until release time
+2. **Be descriptive** - Write clear summaries that will appear in CHANGELOGs
+3. **One changeset per logical change** - Multiple changesets are fine for complex PRs
+4. **Include all affected packages** - If a change affects multiple packages, select them all

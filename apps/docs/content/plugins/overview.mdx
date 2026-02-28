@@ -11,9 +11,11 @@ Plugins are **opt-in and composable** - you choose which capabilities to add to 
 
 ## Built-in Plugins
 
-ts-contract provides two built-in plugins in the `@ts-contract/plugins` package:
+ts-contract provides built-in plugins for both HTTP and WebSocket contracts in the `@ts-contract/plugins` package.
 
-### pathPlugin
+### HTTP Plugins
+
+#### pathPlugin
 
 Adds `buildPath()` method for type-safe URL construction with path parameters and query strings.
 
@@ -61,31 +63,57 @@ const params = api.getUser.validatePathParams(req.params);
 
 [Learn more about validatePlugin →](/plugins/validate-plugin)
 
+### WebSocket Plugins
+
+#### websocketPathPlugin
+
+Adds `buildPath()` method for type-safe WebSocket URL construction with path parameters and query strings.
+
+```ts
+import { websocketPathPlugin } from '@ts-contract/plugins';
+
+const api = initContract(contract)
+  .useWebSocket(websocketPathPlugin)
+  .build();
+
+// Build WebSocket URLs with type-safe parameters
+const url = api.chat.buildPath({ roomId: '123' });
+// => "/ws/chat/123"
+```
+
+**Use cases:**
+- Client-side WebSocket URL construction
+- Building connection URLs
+- Testing and mocking
+
+[Learn more about WebSocket plugins →](/plugins/websocket-plugins)
+
+#### websocketValidatePlugin
+
+Adds validation methods for runtime message validation against your WebSocket contract definitions.
+
+```ts
+import { websocketValidatePlugin } from '@ts-contract/plugins';
+
+const api = initContract(contract)
+  .useWebSocket(websocketValidatePlugin)
+  .build();
+
+// Validate messages
+const msg = api.chat.validateClientMessage('new_msg', data);
+const serverMsg = api.chat.validateServerMessage('new_msg', data);
+```
+
+**Use cases:**
+- Validating WebSocket messages on the client
+- Validating messages on the server
+- Runtime type checking for real-time data
+
+[Learn more about WebSocket plugins →](/plugins/websocket-plugins)
+
 ## Plugin Capabilities
 
-### What Plugins Can Do
-
-Plugins can add any methods to your routes. Common capabilities include:
-
-- **URL building** - Construct paths with parameters
-- **Validation** - Runtime schema validation
-- **Serialization** - Transform data formats
-- **Documentation** - Generate OpenAPI specs
-- **Mocking** - Generate mock data
-- **Logging** - Track API calls
-- **Caching** - Cache responses
-- **Retry logic** - Handle failures
-
-### What Plugins Cannot Do
-
-Plugins operate on individual routes and cannot:
-
-- Modify the contract structure
-- Change route definitions
-- Add new routes
-- Intercept HTTP requests/responses directly
-
-For request/response interception, use your framework's middleware system.
+Plugins can add methods to your routes for URL building, validation, serialization, documentation, mocking, logging, caching, and retry logic. Plugins operate on individual routes and cannot modify contract structure or intercept requests directly (use framework middleware for that).
 
 ## Using Plugins
 
@@ -162,101 +190,30 @@ api.getUser.buildPath({});            // ✗ Error: missing required property 'i
 
 ## Plugin Comparison
 
-| Feature | pathPlugin | validatePlugin |
-|---------|-----------|----------------|
-| **Purpose** | URL construction | Runtime validation |
-| **Main Method** | `buildPath()` | `validateResponse()`, `validateBody()`, etc. |
-| **Use Case** | Client-side requests | Data validation |
-| **Runtime Cost** | Minimal | Schema validation overhead |
-| **Required?** | No | No |
-| **Works With** | Any contract | Contracts with schemas |
+| Feature | pathPlugin | validatePlugin | websocketPathPlugin | websocketValidatePlugin |
+|---------|-----------|----------------|---------------------|-------------------------|
+| **Purpose** | HTTP URL construction | HTTP validation | WebSocket URL construction | WebSocket message validation |
+| **Main Method** | `buildPath()` | `validateResponse()`, `validateBody()` | `buildPath()` | `validateClientMessage()`, `validateServerMessage()` |
+| **Use Case** | HTTP requests | HTTP data validation | WebSocket connections | WebSocket message validation |
+| **Runtime Cost** | Minimal | Schema validation overhead | Minimal | Schema validation overhead |
 
-## When to Use Plugins
-
-### Use Plugins When:
-
-✅ You need runtime utilities (URL building, validation)  
-✅ You want consistent behavior across all routes  
-✅ You're building a client library or SDK  
-✅ You want to avoid repetitive code  
-
-### Skip Plugins When:
-
-❌ You only need type inference (no runtime utilities)  
-❌ You have custom requirements not met by plugins  
-❌ You want absolute minimal bundle size  
-❌ You're integrating with existing utilities that provide similar functionality  
-
-**Example without plugins (type inference only):**
+## Choosing Plugins
 
 ```ts
-import { type InferPathParams, type InferResponseBody } from '@ts-contract/core';
-import { contract } from './contract';
+// Client: both plugins
+const api = initContract(contract)
+  .use(pathPlugin)
+  .use(validatePlugin)
+  .build();
 
-type Params = InferPathParams<typeof contract.getUser>;
+// Server: validation only
+const api = initContract(contract)
+  .use(validatePlugin)
+  .build();
+
+// Type inference only: no plugins needed
+import type { InferResponseBody } from '@ts-contract/core';
 type User = InferResponseBody<typeof contract.getUser, 200>;
-
-// Manually build path
-function buildPath(params: Params): string {
-  return `/users/${params.id}`;
-}
-
-// Manually fetch (skip validation)
-async function getUser(id: string): Promise<User> {
-  const response = await fetch(buildPath({ id }));
-  return response.json();
-}
-```
-
-## Plugin Performance
-
-### Bundle Size
-
-Both built-in plugins are lightweight:
-
-- **pathPlugin**: ~500 bytes minified + gzipped
-- **validatePlugin**: ~800 bytes minified + gzipped (plus your schema library)
-
-### Runtime Performance
-
-- **pathPlugin**: Negligible overhead - simple string interpolation
-- **validatePlugin**: Depends on your schema library (Zod, Valibot, etc.)
-
-Validation overhead is typically acceptable for:
-- Client-side API response validation
-- Server-side request validation
-- Development and testing
-
-For high-performance scenarios, consider:
-- Validating only in development
-- Validating at system boundaries only
-- Using faster schema libraries (Valibot, Arktype)
-
-## Creating Custom Plugins
-
-You can create your own plugins to add custom functionality. See [Creating Custom Plugins](/plugins/creating-custom-plugins) for a complete guide.
-
-**Quick example:**
-
-```ts
-import type { ContractPlugin, RouteDef } from '@ts-contract/core';
-
-declare module '@ts-contract/core' {
-  interface PluginTypeRegistry<R> {
-    logger: {
-      logRoute: () => void;
-    };
-  }
-}
-
-export const loggerPlugin: ContractPlugin<'logger'> = {
-  name: 'logger',
-  route: (route: RouteDef) => ({
-    logRoute: () => {
-      console.log(`${route.method} ${route.path}`);
-    },
-  }),
-};
 ```
 
 ## Best Practices
@@ -334,9 +291,61 @@ const api = initContract(contract)
   .build();
 ```
 
+## Plugin Performance
+
+### Bundle Size
+
+Both built-in plugins are lightweight:
+
+- **pathPlugin**: ~500 bytes minified + gzipped
+- **validatePlugin**: ~800 bytes minified + gzipped (plus your schema library)
+
+### Runtime Performance
+
+- **pathPlugin**: Negligible overhead - simple string interpolation
+- **validatePlugin**: Depends on your schema library (Zod, Valibot, etc.)
+
+Validation overhead is typically acceptable for:
+- Client-side API response validation
+- Server-side request validation
+- Development and testing
+
+For high-performance scenarios, consider:
+- Validating only in development
+- Validating at system boundaries only
+- Using faster schema libraries (Valibot, Arktype)
+
+## Creating Custom Plugins
+
+You can create your own plugins to add custom functionality. See [Creating Custom Plugins](/plugins/creating-custom-plugins) for a complete guide.
+
+**Quick example:**
+
+```ts
+import type { ContractPlugin, RouteDef } from '@ts-contract/core';
+
+declare module '@ts-contract/core' {
+  interface PluginTypeRegistry<R> {
+    logger: {
+      logRoute: () => void;
+    };
+  }
+}
+
+export const loggerPlugin: ContractPlugin<'logger'> = {
+  name: 'logger',
+  route: (route: RouteDef) => ({
+    logRoute: () => {
+      console.log(`${route.method} ${route.path}`);
+    },
+  }),
+};
+```
+
 ## Next Steps
 
-- **[Path Plugin](/plugins/path-plugin)** - Learn about URL construction
+- **[Path Plugin](/plugins/path-plugin)** - Learn about HTTP URL construction
+- **[WebSocket Plugins](/plugins/websocket-plugins)** - Learn about WebSocket plugins
 - **[Validate Plugin](/plugins/validate-plugin)** - Learn about runtime validation
 - **[Creating Custom Plugins](/plugins/creating-custom-plugins)** - Build your own plugins
 - **[Plugin System](/core-concepts/plugin-system)** - Deep dive into how plugins work

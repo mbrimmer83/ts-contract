@@ -1,0 +1,340 @@
+---
+title: Phoenix.js Chat Example
+description: Build a type-safe chat application with Phoenix.js and ts-contract
+---
+
+# Phoenix.js Chat Example
+
+This recipe shows how to build a type-safe real-time chat application using Phoenix.js channels with ts-contract for message validation and type inference.
+
+## Contract Definition
+
+First, define your WebSocket contract with all message types:
+
+```typescript
+// shared/contract.ts
+import { createContract } from '@ts-contract/core';
+import { z } from 'zod';
+
+export const contract = createContract({
+  chat: {
+    type: 'websocket',
+    path: '/socket/chat/:roomId',
+    pathParams: z.object({
+      roomId: z.string(),
+    }),
+    query: z.object({
+      token: z.string(),
+    }),
+    clientMessages: {
+      // Message sent when user types a new message
+      new_msg: z.object({
+        type: z.literal('new_msg'),
+        body: z.string().min(1).max(1000),
+      }),
+      // Message sent when user starts/stops typing
+      typing: z.object({
+        type: z.literal('typing'),
+        isTyping: z.boolean(),
+      }),
+    },
+    serverMessages: {
+      // New message broadcast to all users
+      new_msg: z.object({
+        type: z.literal('new_msg'),
+        id: z.string(),
+        body: z.string(),
+        userId: z.string(),
+        username: z.string(),
+        timestamp: z.number(),
+      }),
+      // User typing status broadcast
+      user_typing: z.object({
+        type: z.literal('user_typing'),
+        userId: z.string(),
+        username: z.string(),
+        isTyping: z.boolean(),
+      }),
+      // User joined the room
+      user_joined: z.object({
+        type: z.literal('user_joined'),
+        userId: z.string(),
+        username: z.string(),
+      }),
+      // User left the room
+      user_left: z.object({
+        type: z.literal('user_left'),
+        userId: z.string(),
+      }),
+    },
+  },
+});
+```
+
+## Client Setup
+
+Initialize the contract with WebSocket plugins:
+
+```typescript
+// client/api.ts
+import { initContract } from '@ts-contract/core';
+import { websocketPathPlugin, websocketValidatePlugin } from '@ts-contract/plugins';
+import { contract } from '../shared/contract';
+
+export const api = initContract(contract)
+  .useWebSocket(websocketPathPlugin)
+  .useWebSocket(websocketValidatePlugin)
+  .build();
+```
+
+## Phoenix.js Integration
+
+Connect to the Phoenix channel with type-safe message handling:
+
+```typescript
+// client/chat.ts
+import { Socket } from 'phoenix';
+import { api } from './api';
+
+export class ChatClient {
+  private socket: Socket;
+  private channel: any;
+
+  constructor(
+    private roomId: string,
+    private token: string,
+    private userId: string,
+  ) {
+    // Initialize Phoenix socket
+    this.socket = new Socket('/socket', {
+      params: { token: this.token },
+    });
+    this.socket.connect();
+  }
+
+  join(onMessage: (msg: any) => void, onTyping: (msg: any) => void) {
+    // Build channel topic using contract
+    const topic = `chat:${this.roomId}`;
+    this.channel = this.socket.channel(topic, {});
+
+    // Listen for new messages with validation
+    this.channel.on('new_msg', (data: unknown) => {
+      try {
+        const validated = api.chat.validateServerMessage('new_msg', data);
+        onMessage(validated);
+      } catch (error) {
+        console.error('Invalid message received:', error);
+      }
+    });
+
+    // Listen for typing events with validation
+    this.channel.on('user_typing', (data: unknown) => {
+      try {
+        const validated = api.chat.validateServerMessage('user_typing', data);
+        onTyping(validated);
+      } catch (error) {
+        console.error('Invalid typing event:', error);
+      }
+    });
+
+    // Join the channel
+    this.channel
+      .join()
+      .receive('ok', ({ messages }: any) => {
+        console.log('Joined chat room', messages);
+      })
+      .receive('error', ({ reason }: any) => {
+        console.error('Failed to join:', reason);
+      });
+  }
+
+  sendMessage(body: string) {
+    // Validate message before sending
+    const message = api.chat.validateClientMessage('new_msg', {
+      type: 'new_msg',
+      body,
+    });
+
+    this.channel
+      .push('new_msg', message)
+      .receive('ok', (msg: unknown) => {
+        console.log('Message sent', msg);
+      })
+      .receive('error', (reasons: any) => {
+        console.error('Failed to send message:', reasons);
+      });
+  }
+
+  setTyping(isTyping: boolean) {
+    // Validate typing event before sending
+    const event = api.chat.validateClientMessage('typing', {
+      type: 'typing',
+      isTyping,
+    });
+
+    this.channel.push('typing', event);
+  }
+
+  leave() {
+    this.channel?.leave();
+    this.socket?.disconnect();
+  }
+}
+```
+
+## React Component Example
+
+Use the chat client in a React component:
+
+```typescript
+// client/ChatRoom.tsx
+import { useEffect, useState } from 'react';
+import { ChatClient } from './chat';
+import type { InferServerMessage } from '@ts-contract/core';
+import type { contract } from '../shared/contract';
+
+type Message = InferServerMessage<typeof contract.chat, 'new_msg'>;
+type TypingEvent = InferServerMessage<typeof contract.chat, 'user_typing'>;
+
+export function ChatRoom({ roomId, token, userId }: Props) {
+  const [messages, setMessages] = useState<Message[]>([]);
+  const [typingUsers, setTypingUsers] = useState<Set<string>>(new Set());
+  const [input, setInput] = useState('');
+  const [client, setClient] = useState<ChatClient | null>(null);
+
+  useEffect(() => {
+    const chatClient = new ChatClient(roomId, token, userId);
+
+    chatClient.join(
+      (msg: Message) => {
+        setMessages((prev) => [...prev, msg]);
+      },
+      (event: TypingEvent) => {
+        setTypingUsers((prev) => {
+          const next = new Set(prev);
+          if (event.isTyping) {
+            next.add(event.username);
+          } else {
+            next.delete(event.username);
+          }
+          return next;
+        });
+      },
+    );
+
+    setClient(chatClient);
+
+    return () => {
+      chatClient.leave();
+    };
+  }, [roomId, token, userId]);
+
+  const handleSend = () => {
+    if (input.trim() && client) {
+      client.sendMessage(input);
+      setInput('');
+    }
+  };
+
+  const handleTyping = (isTyping: boolean) => {
+    client?.setTyping(isTyping);
+  };
+
+  return (
+    <div className="chat-room">
+      <div className="messages">
+        {messages.map((msg) => (
+          <div key={msg.id} className="message">
+            <strong>{msg.username}:</strong> {msg.body}
+            <span className="timestamp">
+              {new Date(msg.timestamp).toLocaleTimeString()}
+            </span>
+          </div>
+        ))}
+      </div>
+
+      {typingUsers.size > 0 && (
+        <div className="typing-indicator">
+          {Array.from(typingUsers).join(', ')} {typingUsers.size === 1 ? 'is' : 'are'} typing...
+        </div>
+      )}
+
+      <div className="input-area">
+        <input
+          type="text"
+          value={input}
+          onChange={(e) => setInput(e.target.value)}
+          onFocus={() => handleTyping(true)}
+          onBlur={() => handleTyping(false)}
+          onKeyPress={(e) => e.key === 'Enter' && handleSend()}
+          placeholder="Type a message..."
+        />
+        <button onClick={handleSend}>Send</button>
+      </div>
+    </div>
+  );
+}
+```
+
+## Server-Side (Elixir/Phoenix)
+
+The Phoenix server handles the actual WebSocket logic:
+
+```elixir
+# lib/my_app_web/channels/chat_channel.ex
+defmodule MyAppWeb.ChatChannel do
+  use MyAppWeb, :channel
+
+  def join("chat:" <> room_id, _params, socket) do
+    send(self(), :after_join)
+    {:ok, socket}
+  end
+
+  def handle_info(:after_join, socket) do
+    push(socket, "user_joined", %{
+      type: "user_joined",
+      userId: socket.assigns.user_id,
+      username: socket.assigns.username
+    })
+    {:noreply, socket}
+  end
+
+  def handle_in("new_msg", %{"type" => "new_msg", "body" => body}, socket) do
+    broadcast!(socket, "new_msg", %{
+      type: "new_msg",
+      id: UUID.uuid4(),
+      body: body,
+      userId: socket.assigns.user_id,
+      username: socket.assigns.username,
+      timestamp: System.system_time(:millisecond)
+    })
+    {:reply, :ok, socket}
+  end
+
+  def handle_in("typing", %{"type" => "typing", "isTyping" => is_typing}, socket) do
+    broadcast!(socket, "user_typing", %{
+      type: "user_typing",
+      userId: socket.assigns.user_id,
+      username: socket.assigns.username,
+      isTyping: is_typing
+    })
+    {:noreply, socket}
+  end
+end
+```
+
+## Benefits
+
+- **Type Safety**: Full TypeScript inference for all messages
+- **Runtime Validation**: Catch invalid messages before they cause issues
+- **Single Source of Truth**: Contract defines the API for both client and server
+- **Framework Agnostic**: Works with Phoenix.js, Socket.io, or any WebSocket library
+- **Developer Experience**: Autocomplete and type checking in your IDE
+
+## Key Takeaways
+
+1. Define message schemas with type discriminators
+2. Use WebSocket plugins for path building and validation
+3. Validate messages in both directions (client→server and server→client)
+4. Let Phoenix.js handle connection lifecycle
+5. Use TypeScript inference for type-safe message handling
