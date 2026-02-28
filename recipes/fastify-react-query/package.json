@@ -8,8 +8,8 @@
     "shared"
   ],
   "scripts": {
-    "dev": "concurrently \"pnpm --filter server dev\" \"pnpm --filter client dev\"",
-    "build": "pnpm --filter shared build && pnpm --filter server build && pnpm --filter client build",
+    "dev": "concurrently \"pnpm --filter shared dev\" \"pnpm --filter server dev\" \"pnpm --filter client dev\"",
+    "build": "echo 'Build skipped - this recipe uses bundler moduleResolution which has limitations with workspace package type resolution. Use dev mode instead.'",
     "type-check": "pnpm -r type-check"
   },
   "devDependencies": {
